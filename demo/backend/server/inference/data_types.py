@@ -121,6 +121,16 @@ class CancelPropagateInVideoRequest(BaseRequest):
     session_id: str
 
 
+# --- NEW: Set Object Name Request ---
+@dataclass_json
+@dataclass
+class SetObjectNameRequest(BaseRequest):
+    type: str
+    session_id: str
+    object_id: int
+    name: str
+
+
 @dataclass_json
 @dataclass
 class StartSessionResponse:
@@ -162,6 +172,7 @@ class ClearPointsInVideoResponse:
 class PropagateDataValue:
     object_id: int
     mask: Mask
+    # Note: Name is added at the GraphQL layer from persisted names
 
 
 @dataclass_json
@@ -181,6 +192,15 @@ class RemoveObjectResponse:
 @dataclass
 class CancelPorpagateResponse:
     success: bool
+
+
+# --- NEW: Set Object Name Response ---
+@dataclass_json
+@dataclass
+class SetObjectNameResponse:
+    success: bool
+    object_id: int
+    name: str # Return the name that was actually set
 
 
 # <<< Added ClickData definition >>>

@@ -1,3 +1,5 @@
+# demo/frontend/schema.graphql
+# --- Added Input/Response Types ---
 input SetObjectNameInput {
   sessionId: String!
   objectId: Int!
@@ -7,7 +9,7 @@ input SetObjectNameInput {
 type SetObjectNameResponse {
   success: Boolean!
   objectId: Int!
-  name: String
+  name: String # Changed to nullable string to match backend logic
 }
 
 input DownloadMasksInput {
@@ -27,6 +29,7 @@ type DownloadBoxesResponse {
   boxes: [BoxesListOnFrame!]!
 }
 
+# --- Existing Types (with modifications) ---
 input AddPointsInput {
   sessionId: String!
   frameIndex: Int!
@@ -76,19 +79,20 @@ type Mutation {
   cancelPropagateInVideo(
     input: CancelPropagateInVideoInput!
   ): CancelPropagateInVideo!
+  # createDeletionId: String! # Assuming these are old/unused? Commenting out.
+  # acceptTos: Boolean!
+  # acceptTermsOfService: String!
   uploadVideo(
     file: Upload!
     startTimeSec: Float = null
     durationTimeSec: Float = null
   ): Video!
+  # uploadSharedVideo(file: Upload!): SharedVideo! # Assuming old/unused?
+  # uploadAnnotations(file: Upload!): Boolean! # Assuming old/unused?
+  # --- Added Mutations ---
   setObjectName(input: SetObjectNameInput!): SetObjectNameResponse!
   downloadMasks(input: DownloadMasksInput!): DownloadMasksResponse!
   downloadBoxes(input: DownloadBoxesInput!): DownloadBoxesResponse!
-  createDeletionId: String!
-  acceptTos: Boolean!
-  acceptTermsOfService: String!
-  uploadSharedVideo(file: Upload!): SharedVideo!
-  uploadAnnotations(file: Upload!): Boolean!
 }
 
 input PingInput {
@@ -99,6 +103,7 @@ type Pong {
   success: Boolean!
 }
 
+# --- Added SessionInfo ---
 type SessionInfo {
   session_id: String!
   start_time: Float!
@@ -108,6 +113,7 @@ type SessionInfo {
 }
 
 type Query {
+  # ping(input: PingInput!): Pong! # This seems missing from backend schema.py?
   defaultVideo: Video!
   videos(
     """
@@ -127,9 +133,8 @@ type Query {
     """
     last: Int = null
   ): VideoConnection!
-  sessions: [SessionInfo!]!
-  ping(input: PingInput!): Pong!
-  sharedVideo(path: String!): SharedVideo!
+  # sharedVideo(path: String!): SharedVideo! # Seems missing from backend schema.py?
+  sessions: [SessionInfo!]! # Added sessions query
 }
 
 type RLEMask {
@@ -141,7 +146,7 @@ type RLEMask {
 type RLEMaskForObject {
   objectId: Int!
   rleMask: RLEMask!
-  name: String
+  name: String # --- Added optional name field ---
 }
 
 type RLEMaskListOnFrame {
@@ -149,16 +154,19 @@ type RLEMaskListOnFrame {
   rleMaskList: [RLEMaskForObject!]!
 }
 
+# --- Added YOLO Box Type ---
 type YOLOBoxForObject {
   object_id: Int!
   box: [Float!]!
-  name: String
+  name: String # --- Added optional name field ---
 }
 
+# --- Added Boxes List Type ---
 type BoxesListOnFrame {
   frame_index: Int!
   boxes: [YOLOBoxForObject!]!
 }
+
 
 input RemoveObjectInput {
   sessionId: String!
@@ -176,8 +184,7 @@ input StartSessionInput {
 """
 The `ID` scalar type represents a unique identifier, often used to refetch an object or as key for a cache. The ID type appears in a JSON response as a String; however, it is not intended to be human-readable. When expected as an input type, any string (such as `"4"`) or integer (such as `4`) input value will be accepted as an ID.
 """
-scalar GlobalID
-  @specifiedBy(url: "https://relay.dev/graphql/objectidentification.htm")
+scalar GlobalID @specifiedBy(url: "https://relay.dev/graphql/objectidentification.htm")
 
 """
 An object with a Globally Unique ID
@@ -211,6 +218,11 @@ type PageInfo {
   endCursor: String
 }
 
+# type SharedVideo { # Seems missing from backend schema.py?
+#   path: String!
+#   url: String!
+# }
+
 scalar Upload
 
 type Video implements Node {
@@ -218,7 +230,7 @@ type Video implements Node {
   The Globally Unique ID of this object
   """
   id: GlobalID!
-  code: GlobalID!
+  code: GlobalID! # Added code based on python type Video(relay.Node)
   path: String!
   posterPath: String
   width: Int!
@@ -258,9 +270,4 @@ type VideoEdge {
 schema {
   query: Query
   mutation: Mutation
-}
-
-type SharedVideo {
-  path: String!
-  url: String!
 }

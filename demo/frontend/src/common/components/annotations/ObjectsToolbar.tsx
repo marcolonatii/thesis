@@ -29,10 +29,14 @@ import {
   trackletObjectsAtom,
   trackletNamesAtom, // Import names atom
   labelTypeAtom, // Import label type atom
+  sessionAtom, // Import session atom to get session ID
 } from '@/demo/atoms';
 import {BaseTracklet} from '@/common/tracker/Tracker';
 import {useAtom, useAtomValue, useSetAtom} from 'jotai';
 import {useState, useEffect, useCallback} from 'react'; // Import hooks
+import { graphql, useMutation } from 'react-relay'; // Import useMutation
+import type { SetObjectNameMutation } from '@/graphql/mutations/__generated__/SetObjectNameMutation.graphql'; // Import generated type
+import useMessagesSnackbar from '@/common/components/snackbar/useDemoMessagesSnackbar'; // For error messages
 
 type Props = {
   onTabChange: (newIndex: number) => void;
@@ -54,6 +58,8 @@ export default function ObjectsToolbar({onTabChange}: Props) {
   const isAddObjectEnabled = useAtomValue(isAddObjectEnabledAtom);
   const [trackletNames, setTrackletNames] = useAtom(trackletNamesAtom); // Get names state + setter
   const setLabelType = useSetAtom(labelTypeAtom); // Needed after initial object creation
+  const session = useAtomValue(sessionAtom); // Get session state
+  const { enqueueMessage, enqueueError } = useMessagesSnackbar(); // For feedback
 
   // State for managing the ObjectNameModal
   const [modalState, setModalState] = useState<ModalState>({
@@ -66,30 +72,41 @@ export default function ObjectsToolbar({onTabChange}: Props) {
   // State to track if the initial naming modal has been triggered
   const [initialNamePrompted, setInitialNamePrompted] = useState(false);
 
+  // Setup GraphQL Mutation
+  const [commitSetObjectName, isSettingName] = useMutation<SetObjectNameMutation>(graphql`
+    mutation ObjectsToolbarSetObjectNameMutation($input: SetObjectNameInput!) {
+      setObjectName(input: $input) {
+        success
+        objectId
+        name
+      }
+    }
+  `);
+
   // Effect to trigger modal for the *first* object after the first click
   useEffect(() => {
       // Only run if the first click was made, we have exactly one tracklet,
       // and we haven't prompted for its name yet.
       if (isFirstClickMade && tracklets.length === 1 && !initialNamePrompted) {
-          const firstTracklet = tracklets[0];
-          // Check if it *already* somehow has a name (e.g., state persistence)
-          const hasName = !!trackletNames[firstTracklet.id];
+        const firstTracklet = tracklets[0];
+        // Check if it *already* somehow has a name (e.g., state persistence)
+        const hasName = !!trackletNames[firstTracklet.id];
 
-          if (!hasName && firstTracklet.isInitialized) {
-              setModalState({
-                  isOpen: true,
-                  trackletId: firstTracklet.id,
-                  currentName: '', // Start with empty name for the first object
-                  isEditing: false, // This is initial naming
-              });
-              setActiveTrackletId(firstTracklet.id); // Ensure it's active
-              setLabelType('positive'); // Set default label type
-              setInitialNamePrompted(true); // Mark as prompted
-          } else if (hasName || !firstTracklet.isInitialized) {
-              // If it has a name or is not initialized yet, mark as prompted anyway
-              // to prevent issues if isInitialized flips later without a name prompt.
-              setInitialNamePrompted(true);
-          }
+        if (!hasName && firstTracklet.isInitialized) {
+            setModalState({
+                isOpen: true,
+                trackletId: firstTracklet.id,
+                currentName: '', // Start with empty name for the first object
+                isEditing: false, // This is initial naming
+            });
+            setActiveTrackletId(firstTracklet.id); // Ensure it's active
+            setLabelType('positive'); // Set default label type
+            setInitialNamePrompted(true); // Mark as prompted
+        } else if (hasName || !firstTracklet.isInitialized) {
+            // If it has a name or is not initialized yet, mark as prompted anyway
+            // to prevent issues if isInitialized flips later without a name prompt.
+            setInitialNamePrompted(true);
+        }
       }
       // Reset prompted flag if tracklets are cleared
       if (tracklets.length === 0 && initialNamePrompted) {
@@ -103,28 +120,87 @@ export default function ObjectsToolbar({onTabChange}: Props) {
     setModalState({
         isOpen: true,
         trackletId: trackletId,
-        currentName: currentName.startsWith('Object ') ? '' : currentName, // Clear default name placeholder
+        // If current name is the default "Object X", show empty input, otherwise show current name
+        currentName: currentName.startsWith('Object ') ? '' : currentName,
         isEditing: true, // This is editing
     });
   }, []); // No dependencies needed
 
   // Function to handle confirmation from the modal
   const handleConfirmName = (newName: string) => {
-    if (modalState.trackletId !== null) {
-      const finalName = newName.trim();
-      setTrackletNames((prev) => {
-        const updatedNames = { ...prev };
-        if (finalName) {
-          updatedNames[modalState.trackletId!] = finalName;
-        } else {
-          // If the user clears the name, remove the custom name
-          // so it reverts to the default "Object X"
-          delete updatedNames[modalState.trackletId!];
-        }
-        return updatedNames;
-      });
+    const objectIdToUpdate = modalState.trackletId;
+    if (objectIdToUpdate === null) {
+      console.error('Cannot confirm name, trackletId is null');
+      enqueueError('Failed to update name: Invalid object selected.');
+      return;
     }
-    // Close the modal and reset state
+
+    if (!session?.id) {
+      console.error('Cannot confirm name, session ID is missing');
+      enqueueError('Failed to update name: Session not found.');
+      return;
+    }
+
+    const finalName = newName.trim();
+
+    // 1. Update local Jotai state immediately for responsiveness
+    setTrackletNames((prev) => {
+      const updatedNames = { ...prev };
+      if (finalName) {
+        updatedNames[objectIdToUpdate] = finalName;
+      } else {
+        // If the user clears the name, remove the custom name locally
+        delete updatedNames[objectIdToUpdate];
+      }
+      return updatedNames;
+    });
+
+    // 2. Call the GraphQL mutation to update the backend
+    commitSetObjectName({
+      variables: {
+        input: {
+          sessionId: session.id,
+          objectId: objectIdToUpdate,
+          name: finalName, // Send trimmed name (can be empty string to clear)
+        },
+      },
+      onCompleted: (response, errors) => {
+        if (errors) {
+          console.error('Error setting object name:', errors);
+          enqueueError(`Failed to save name: ${errors[0].message}`);
+          // Optionally revert local state here if backend failed
+          // setTrackletNames(prev => { ... revert logic ...});
+        } else if (response.setObjectName?.success) {
+          console.log(`Successfully set name for object ${response.setObjectName.objectId} to '${response.setObjectName.name}'`);
+          // Optionally show a success message
+          // enqueueMessage('Name saved successfully');
+
+          // Ensure local state matches backend response (especially if backend cleared name)
+          const backendName = response.setObjectName.name;
+          setTrackletNames((prev) => {
+                const updatedNames = { ...prev };
+                if (backendName) {
+                    updatedNames[objectIdToUpdate] = backendName;
+                } else {
+                    delete updatedNames[objectIdToUpdate];
+                }
+                return updatedNames;
+            });
+
+        } else {
+          console.error('Failed to set object name (backend reported failure):', response);
+          enqueueError('Failed to save name on the server.');
+          // Optionally revert local state here
+        }
+      },
+      onError: (error) => {
+        console.error('Network/GraphQL error setting object name:', error);
+        enqueueError(`Failed to save name: ${error.message}`);
+        // Optionally revert local state here
+      },
+    });
+
+    // 3. Close the modal and reset state
     setModalState({ isOpen: false, trackletId: null, currentName: '', isEditing: false });
   };
 

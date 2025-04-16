@@ -219,3 +219,5 @@ class SetObjectNameInput:
 class SetObjectNameResponse:
     """Response type for the setObjectName mutation."""
     success: bool
+    object_id: int # Return the affected object_id
+    name: Optional[str] # Return the name that was set (or None if cleared)

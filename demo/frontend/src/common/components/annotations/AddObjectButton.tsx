@@ -15,20 +15,34 @@
  */
 import useMessagesSnackbar from '@/common/components/snackbar/useDemoMessagesSnackbar';
 import useVideo from '@/common/components/video/editor/useVideo';
-import {activeTrackletObjectIdAtom, labelTypeAtom, trackletNamesAtom} from '@/demo/atoms';
+import {activeTrackletObjectIdAtom, labelTypeAtom, sessionAtom, trackletNamesAtom} from '@/demo/atoms'; // Added sessionAtom
 import {Add} from '@carbon/icons-react';
-import {useAtom} from 'jotai';
+import {useAtom, useAtomValue, useSetAtom} from 'jotai'; // Added useSetAtom, useAtomValue
 import {useState} from 'react';
 import ObjectNameModal from '@/common/components/annotations/ObjectNameModal';
+import { graphql, useMutation } from 'react-relay'; // Added Relay imports
+import type { SetObjectNameMutation } from '@/graphql/mutations/__generated__/SetObjectNameMutation.graphql'; // Added type import
 
 export default function AddObjectButton() {
   const video = useVideo();
   const [trackletNames, setTrackletNames] = useAtom(trackletNamesAtom);
   const [activeTrackletId, setActiveTrackletId] = useAtom(activeTrackletObjectIdAtom);
-  const setLabelType = useAtom(labelTypeAtom)[1];
-  const {enqueueMessage} = useMessagesSnackbar();
+  const setLabelType = useSetAtom(labelTypeAtom); // Changed from useAtom[1] to useSetAtom
+  const session = useAtomValue(sessionAtom); // Get session state
+  const {enqueueMessage, enqueueError} = useMessagesSnackbar(); // Added enqueueError
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [objectName, setObjectName] = useState('');
+
+  // Setup GraphQL Mutation
+  const [commitSetObjectName, isSettingName] = useMutation<SetObjectNameMutation>(graphql`
+    mutation AddObjectButtonSetObjectNameMutation($input: SetObjectNameInput!) {
+      setObjectName(input: $input) {
+        success
+        objectId
+        name
+      }
+    }
+  `);
 
   function handleOpenModal() {
     setObjectName(''); // Reset name field when opening for a new object
@@ -38,18 +52,76 @@ export default function AddObjectButton() {
   async function handleConfirmName(name: string) {
     setIsModalOpen(false); // Close modal first
     enqueueMessage('addObjectClick');
+
+    // 1. Create the tracklet locally
     const tracklet = await video?.createTracklet();
-    if (tracklet != null) {
-      setActiveTrackletId(tracklet.id);
-      setLabelType('positive');
-      const finalName = name.trim();
-      if (finalName) {
-        // Use functional update for atom
-        setTrackletNames((prev) => ({ ...prev, [tracklet.id]: finalName }));
-      }
-      // If name is empty, default name "Object X" will be used by getObjectLabel
+    if (tracklet == null) {
+        enqueueError('Failed to create new object locally.');
+        setObjectName(''); // Reset name state
+        return;
     }
-    // Reset object name state only after processing
+
+    setActiveTrackletId(tracklet.id);
+    setLabelType('positive');
+    const finalName = name.trim();
+
+    // 2. Update local Jotai state immediately
+    if (finalName) {
+      // Use functional update for atom
+      setTrackletNames((prev) => ({ ...prev, [tracklet.id]: finalName }));
+    }
+    // If name is empty, default name "Object X" will be used by getObjectLabel
+
+    // 3. If a name was provided, call the backend mutation
+    if (finalName) {
+      if (!session?.id) {
+        console.error('Cannot set name for new object, session ID is missing');
+        enqueueError('Failed to save name for new object: Session not found.');
+        // Keep local changes, but backend won't be updated
+      } else {
+          commitSetObjectName({
+          variables: {
+            input: {
+              sessionId: session.id,
+              objectId: tracklet.id,
+              name: finalName,
+            },
+          },
+          onCompleted: (response, errors) => {
+            if (errors) {
+              console.error('Error setting name for new object:', errors);
+              enqueueError(`Failed to save name for new object: ${errors[0].message}`);
+              // Optionally revert local state
+            } else if (response.setObjectName?.success) {
+              console.log(`Successfully set name for new object ${response.setObjectName.objectId} to '${response.setObjectName.name}'`);
+              // Ensure local state matches backend (should already match if finalName was set)
+              const backendName = response.setObjectName.name;
+               setTrackletNames((prev) => {
+                    const updatedNames = { ...prev };
+                    if (backendName) {
+                        updatedNames[tracklet.id] = backendName;
+                    } else {
+                        // Should not happen if finalName was non-empty, but handle defensively
+                        delete updatedNames[tracklet.id];
+                    }
+                    return updatedNames;
+                });
+            } else {
+              console.error('Failed to set name for new object (backend reported failure):', response);
+              enqueueError('Failed to save name for new object on the server.');
+              // Optionally revert local state
+            }
+          },
+          onError: (error) => {
+            console.error('Network/GraphQL error setting name for new object:', error);
+            enqueueError(`Failed to save name for new object: ${error.message}`);
+            // Optionally revert local state
+          },
+        });
+      }
+    }
+
+    // 4. Reset object name state after processing
     setObjectName('');
   }
 

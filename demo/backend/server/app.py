@@ -36,7 +36,7 @@ from inference.api import InferenceAPI
 
 logger = logging.getLogger(__name__)
 # Force DEBUG logs to see detailed messages from inference modules
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 # Set higher level for noisy libraries if needed
 # logging.getLogger("PIL").setLevel(logging.WARNING)
 

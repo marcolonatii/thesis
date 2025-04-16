@@ -40,6 +40,8 @@ from data.data_types import (
     RLEMaskForObject,
     RLEMaskListOnFrame,
     SessionInfo,
+    SetObjectNameInput,
+    SetObjectNameResponse,
     StartSession,
     StartSessionInput,
     Video,
@@ -57,14 +59,17 @@ from inference.data_types import (
     DownloadMasksResponse as InferenceDownloadMasksResponse,
     PropagateDataResponse,
     RemoveObjectRequest,
+    SetObjectNameRequest,
+    SetObjectNameResponse as InferenceSetObjectNameResponse,
     StartSessionRequest,
 )
 from inference.api import InferenceAPI
 from strawberry import relay
 from strawberry.file_uploads import Upload
-from strawberry.exceptions import StrawberryGraphQLError # Updated import
+from strawberry.exceptions import StrawberryGraphQLError
 from tqdm import tqdm
 import pycocotools.mask as maskUtils
+from inference.session_manager import load_object_names
 
 logger = logging.getLogger(__name__)
 
@@ -217,16 +222,20 @@ class Mutation:
             labels=input.labels,
             clear_old_points=input.clear_old_points,
         )
-        reponse = inference_api.add_points(request)
+        response = inference_api.add_points(request)
+
+        # Get current names for the session to include in the response
+        object_names = load_object_names(input.session_id)
 
         return RLEMaskListOnFrame(
-            frame_index=reponse.frame_index,
+            frame_index=response.frame_index,
             rle_mask_list=[
                 RLEMaskForObject(
                     object_id=r.object_id,
                     rle_mask=RLEMask(counts=r.mask.counts, size=r.mask.size, order="F"),
+                    name=object_names.get(r.object_id) # Add name here
                 )
-                for r in reponse.results
+                for r in response.results
             ],
         )
 
@@ -241,6 +250,8 @@ class Mutation:
         )
 
         response = inference_api.remove_object(request)
+        # Get current names for the session *after* removal
+        object_names = load_object_names(input.session_id)
 
         return [
             RLEMaskListOnFrame(
@@ -251,6 +262,7 @@ class Mutation:
                         rle_mask=RLEMask(
                             counts=r.mask.counts, size=r.mask.size, order="F"
                         ),
+                        name=object_names.get(r.object_id) # Add name here
                     )
                     for r in res.results
                 ],
@@ -272,6 +284,8 @@ class Mutation:
         )
 
         response = inference_api.clear_points_in_frame(request)
+        # Get current names for the session
+        object_names = load_object_names(input.session_id)
 
         return RLEMaskListOnFrame(
             frame_index=response.frame_index,
@@ -279,6 +293,7 @@ class Mutation:
                 RLEMaskForObject(
                     object_id=r.object_id,
                     rle_mask=RLEMask(counts=r.mask.counts, size=r.mask.size, order="F"),
+                    name=object_names.get(r.object_id) # Add name here
                 )
                 for r in response.results
             ],
@@ -310,19 +325,51 @@ class Mutation:
         response = inference_api.cancel_propagate_in_video(request)
         return CancelPropagateInVideo(success=response.success)
 
+    # --- NEW: setObjectName Mutation ---
+    @strawberry.mutation
+    def set_object_name(
+        self, input: SetObjectNameInput, info: strawberry.Info
+    ) -> SetObjectNameResponse:
+        """
+        Sets or clears the custom name for a tracked object within a session.
+        """
+        inference_api: InferenceAPI = info.context["inference_api"]
+        logger.info(f"Received setObjectName request for session {input.session_id}, object {input.object_id}, name '{input.name}'")
+
+        request = SetObjectNameRequest(
+            type="set_object_name",
+            session_id=input.session_id,
+            object_id=input.object_id,
+            name=input.name,
+        )
+
+        try:
+            response = inference_api.set_object_name(request=request)
+            logger.info(f"Successfully set name for object {response.object_id} in session {input.session_id} to '{response.name}'")
+            # Map InferenceSetObjectNameResponse to GraphQL SetObjectNameResponse
+            return SetObjectNameResponse(
+                success=response.success,
+                object_id=response.object_id,
+                name=response.name if response.name else None # Return None if name is empty string
+            )
+        except RuntimeError as e:
+            logger.error(f"Failed to set object name for session {input.session_id}, object {input.object_id}: {e}", exc_info=True)
+            # Check for specific errors like session not found
+            if "Cannot find session" in str(e):
+                raise StrawberryGraphQLError(f"Session '{input.session_id}' not found.")
+            else:
+                raise StrawberryGraphQLError(f"Failed to set object name: {str(e)}")
+        except Exception as e:
+            logger.exception(f"Unexpected error in setObjectName for session {input.session_id}, object {input.object_id}")
+            raise StrawberryGraphQLError(f"An unexpected error occurred while setting the object name: {str(e)}")
+
+    # --- Updated Download Mutations ---
     @strawberry.mutation
     def download_masks(
         self, input: DownloadMasksInput, info: strawberry.Info
     ) -> DownloadMasksResponse:
         """
-        Retrieve all masks for all frames in the specified session.
-
-        Args:
-            input: The DownloadMasksInput containing the session_id.
-            info: Strawberry context info containing the inference_api.
-
-        Returns:
-            A DownloadMasksResponse with a list of RLEMaskListOnFrame objects.
+        Retrieve all masks for all frames in the specified session, including object names.
         """
         inference_api: InferenceAPI = info.context["inference_api"]
 
@@ -330,7 +377,11 @@ class Mutation:
             type="download_masks",
             session_id=input.session_id,
         )
-        response = inference_api.download_masks(request)
+        # This call now returns masks and potentially updates the cache
+        response: InferenceDownloadMasksResponse = inference_api.download_masks(request)
+
+        # Load names *after* potentially generating/caching masks
+        object_names = load_object_names(input.session_id)
 
         gql_masks = []
         for frame_result in response.results:
@@ -344,6 +395,7 @@ class Mutation:
                             size=mask_data.mask.size,
                             order="F",
                         ),
+                        name=object_names.get(mask_data.object_id) # Add name here
                     )
                 )
             gql_masks.append(
@@ -360,14 +412,7 @@ class Mutation:
     ) -> DownloadBoxesResponse:
         """
         Retrieve bounding boxes derived from masks for all frames in the specified session
-        in the requested format (currently only YOLO).
-
-        Args:
-            input: The DownloadBoxesInput containing the session_id and desired format.
-            info: Strawberry context info containing the inference_api.
-
-        Returns:
-            A DownloadBoxesResponse with a list of BoxesListOnFrame objects.
+        in the requested format (currently only YOLO), including object names.
         """
         inference_api: InferenceAPI = info.context["inference_api"]
         logger.info(f"Processing download_boxes request for session {input.session_id} in format {input.format}")
@@ -375,11 +420,15 @@ class Mutation:
         if input.format.lower() != "yolo":
             raise StrawberryGraphQLError(f"Unsupported format '{input.format}'. Only 'yolo' is supported.") # Updated
 
-        request = DownloadMasksRequest(
+        # Get masks first (this ensures they are generated/cached)
+        mask_request = DownloadMasksRequest(
             type="download_masks",
             session_id=input.session_id,
         )
-        masks_response: InferenceDownloadMasksResponse = inference_api.download_masks(request=request)
+        masks_response: InferenceDownloadMasksResponse = inference_api.download_masks(request=mask_request)
+
+        # Load object names
+        object_names = load_object_names(input.session_id)
 
         def rle_to_yolo(rle_mask_data):
             try:
@@ -404,7 +453,11 @@ class Mutation:
                 yolo_box = rle_to_yolo(mask_data.mask)
                 if yolo_box is not None:
                     boxes_for_frame.append(
-                        YOLOBoxForObject(object_id=mask_data.object_id, box=yolo_box)
+                        YOLOBoxForObject(
+                            object_id=mask_data.object_id,
+                            box=yolo_box,
+                            name=object_names.get(mask_data.object_id) # Add name here
+                        )
                     )
                 else:
                     logger.warning(f"Skipping box for object {mask_data.object_id} on frame {frame_result.frame_index} due to conversion error.")
@@ -416,6 +469,8 @@ class Mutation:
         logger.info(f"Generated YOLO boxes for {len(boxes_response)} frames for session {input.session_id}")
         return DownloadBoxesResponse(boxes=boxes_response)
 
+
+# --- Helper Functions (Unchanged) ---
 
 def get_file_hash(video_path_or_file) -> str:
     """Calculate SHA256 hash of a file or file-like object."""
