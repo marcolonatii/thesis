@@ -120,7 +120,6 @@ export class SAM2Model extends Tracker {
     // Reset streaming state. Force update with the true flag to make sure the
     // UI updates its state.
     this._updateStreamingState('none', true);
-
     return new Promise(resolve => {
       try {
         commitMutation<SAM2ModelStartSessionMutation>(this._environment, {
@@ -218,7 +217,6 @@ export class SAM2Model extends Tracker {
         -1,
       ) + 1;
 
-    console.log(`Creating a new tracklet with id ${nextId} and color ${THEME_COLORS[nextId % THEME_COLORS.length]}`);
     const newTracklet = {
       id: nextId,
       color: THEME_COLORS[nextId % THEME_COLORS.length],

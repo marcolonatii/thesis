@@ -93,7 +93,6 @@ export default function AddObjectButton() {
               enqueueError(`Failed to save name for new object: ${errors[0].message}`);
               // Optionally revert local state
             } else if (response.setObjectName?.success) {
-              console.log(`Successfully set name for new object ${response.setObjectName.objectId} to '${response.setObjectName.name}'`);
               // Ensure local state matches backend (should already match if finalName was set)
               const backendName = response.setObjectName.name;
                setTrackletNames((prev) => {

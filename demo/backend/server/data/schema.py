@@ -105,6 +105,8 @@ class Query:
         Return all available videos from the store.
         """
         all_videos = get_videos()
+        logger.info(f"Returning {len(all_videos)} videos")
+        logger.info(f"Videos: {all_videos}")
         return all_videos.values()
 
     @strawberry.field

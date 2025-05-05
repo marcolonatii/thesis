@@ -43,7 +43,8 @@ services:
       # Map host port 7263 to container's Gunicorn port 5000
       - "7263:5000"
     volumes:
-      - sam2-data:/data/:rw
+      - ./demo/data/:/data/:rw
+      - /home/justin/applied2/customer/example/sim/datasets:/datasets:ro
     environment:
       - SERVER_ENVIRONMENT=DEV
       - GUNICORN_WORKERS=1
@@ -51,8 +52,9 @@ services:
       - GUNICORN_PORT=5000
       - MODEL_SIZE=base_plus # Also set as runtime env var
       - API_URL=http://localhost:7263 # Backend uses this to construct URLs returned to frontend
-      - DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4
+      - DEFAULT_VIDEO_PATH=/datasets/test_sam2_data_1
       - FFMPEG_NUM_THREADS=64 # Adjust as needed
+      - DATA_PATH=/datasets
       - VIDEO_ENCODE_CODEC=libx264
       - VIDEO_ENCODE_CRF=23
       - VIDEO_ENCODE_FPS=24
@@ -66,11 +68,3 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-
-volumes:
-  sam2-data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /mnt/ssd/sam2-docker

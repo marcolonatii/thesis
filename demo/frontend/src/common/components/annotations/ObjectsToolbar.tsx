@@ -171,7 +171,6 @@ export default function ObjectsToolbar({onTabChange}: Props) {
           // Optionally revert local state here if backend failed
           // setTrackletNames(prev => { ... revert logic ...});
         } else if (response.setObjectName?.success) {
-          console.log(`Successfully set name for object ${response.setObjectName.objectId} to '${response.setObjectName.name}'`);
           // Optionally show a success message
           // enqueueMessage('Name saved successfully');
 

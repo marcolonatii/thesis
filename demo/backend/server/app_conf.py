@@ -20,7 +20,7 @@ logger.info(f"using model size {MODEL_SIZE}")
 FFMPEG_NUM_THREADS = int(os.getenv("FFMPEG_NUM_THREADS", "4"))
 
 # Path for all data used in API
-DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
+DATA_PATH = Path(os.getenv("DATA_PATH", "/datasets"))
 
 # Max duration an uploaded video can have in seconds. The default is 10
 # seconds.
@@ -34,7 +34,7 @@ DEFAULT_VIDEO_PATH = os.getenv("DEFAULT_VIDEO_PATH")
 GALLERY_PREFIX = "gallery"
 
 # Path where all gallery videos are stored
-GALLERY_PATH = DATA_PATH / GALLERY_PREFIX
+GALLERY_PATH = DATA_PATH
 
 # Prefix for uploaded videos
 UPLOADS_PREFIX = "uploads"
@@ -46,15 +46,15 @@ UPLOADS_PATH = DATA_PATH / UPLOADS_PREFIX
 POSTERS_PREFIX = "posters"
 
 # Path where all posters are stored
-POSTERS_PATH = DATA_PATH / POSTERS_PREFIX
+POSTERS_PATH = Path("/data") / POSTERS_PREFIX
 
 SESSIONS_PREFIX = "sessions"
 
 # Path where all sessions are stored
-SESSIONS_PATH = DATA_PATH / SESSIONS_PREFIX
+SESSIONS_PATH = Path("/data") / SESSIONS_PREFIX
 
 # Make sure any of those paths exist
-os.makedirs(DATA_PATH, exist_ok=True)
-os.makedirs(GALLERY_PATH, exist_ok=True)
-os.makedirs(UPLOADS_PATH, exist_ok=True)
+# os.makedirs(DATA_PATH, exist_ok=True)
+# os.makedirs(GALLERY_PATH, exist_ok=True)
+# os.makedirs(UPLOADS_PATH, exist_ok=True)
 os.makedirs(POSTERS_PATH, exist_ok=True)

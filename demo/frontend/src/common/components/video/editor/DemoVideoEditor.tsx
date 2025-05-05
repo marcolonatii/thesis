@@ -170,6 +170,7 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
       inferenceEndpoint: settings.inferenceAPIEndpoint,
     });
 
+    console.log("input video path", inputVideo.path);
     video?.startSession(inputVideo.path);
 
     return () => {
@@ -258,7 +259,7 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
       {!isMobile && <MessagesSnackbar key="snackbar-layer" />}
     </>
   );
-
+  
   return (
     <>
       {(isVideoLoading || session === null) && !isSessionStartFailed && (

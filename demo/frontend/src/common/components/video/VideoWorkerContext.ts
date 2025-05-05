@@ -31,7 +31,10 @@ import AllEffects, {
 } from '@/common/components/video/effects/Effects';
 import Logger from '@/common/logger/Logger';
 import {Mask, SegmentationPoint, Tracklet} from '@/common/tracker/Tracker';
-import {streamFile} from '@/common/utils/FileUtils';
+import {
+  ImageFrameInfo,
+  streamImageFrames
+} from '@/common/utils/FileUtils';
 import {Stats} from '@/debug/stats/Stats';
 import {VIDEO_WATERMARK_TEXT} from '@/demo/DemoConfig';
 import CreateFilmstripError from '@/graphql/errors/CreateFilmstripError';
@@ -234,7 +237,7 @@ export default class VideoWorkerContext {
     }
 
     const {numFrames, fps} = this._decodedVideo;
-    const timePerFrame = 1000 / (fps ?? 30);
+    const timePerFrame = 1000 / (fps ?? 5);
     let startTime: number | null = null;
     // The offset frame index compensate for cases where the video playback
     // does not start at frame index 0.
@@ -527,79 +530,167 @@ export default class VideoWorkerContext {
 
     this.sendResponse('loadstart');
 
-    const fileStream = streamFile(src, {
-      credentials: 'same-origin',
-      cache: 'no-store',
-    });
-
     let renderedFirstFrame = false;
-    this._decodedVideo = await decodeStream(fileStream, async progress => {
-      const {fps, height, width, numFrames, frames} = progress;
-      this._decodedVideo = progress;
-      if (!renderedFirstFrame) {
-        renderedFirstFrame = true;
+
+    try {
+      // Fetch all frames in a single request
+      const allFramesResponse = await fetch(`${src}/all_frames`, { method: 'GET' });
+      
+      if (!allFramesResponse.ok) {
+        throw new Error(`Failed to fetch frames: ${allFramesResponse.status} ${allFramesResponse.statusText}`);
+      }
+      
+      const allFramesData = await allFramesResponse.json();
+      const framesData = allFramesData.frames;
+      
+      if (!framesData || framesData.length === 0) {
+        Logger.error('No frames found in directory');
+        return;
+      }
+      
+      // Process the first frame to get dimensions
+      const firstFrameData = framesData[0];
+      const firstFrameBlob = this._base64ToBlob(
+        firstFrameData.data, 
+        firstFrameData.mimetype
+      );
+      const firstFrame = await createImageBitmap(firstFrameBlob);
+      
+      const fps = 5; // Default FPS for image sequences
+      const width = firstFrame.width;
+      const height = firstFrame.height;
+      
+      // Initialize our canvas with the first frame's dimensions
+      if (canvas) {
         canvas.width = width;
         canvas.height = height;
-        // Set WebGL contexts right after the first frame decoded
-        this.initializeWebGLContext(width, height);
-
-        // Initialize effect once first frame was decoded.
-        for (const [i, effect] of this._effects.entries()) {
-          const offCanvas =
-            i === EffectIndex.BACKGROUND
-              ? this._canvasBackground
-              : this._canvasHighlights;
-          invariant(offCanvas != null, 'need canvas to render effects');
-          const webglContext =
-            i === EffectIndex.BACKGROUND ? this._glBackground : this._glObjects;
-          invariant(
-            webglContext != null,
-            'need WebGL context to render effects',
-          );
-          await effect.setup({
-            width,
-            height,
-            canvas: offCanvas,
-            gl: webglContext,
-          });
-        }
-
-        // Need to render frame immediately. Cannot go through
-        // requestAnimationFrame because then rendering this frame would be
-        // delayed until the full video has finished decoding.
-        this._drawFrame();
-
-        this._stats.videoFps?.updateMaxValue(fps);
-        this._stats.total?.updateMaxValue(1000 / fps);
-        this._stats.effect0?.updateMaxValue(1000 / fps);
-        this._stats.effect1?.updateMaxValue(1000 / fps);
-        this._stats.frameBmp?.updateMaxValue(1000 / fps);
-        this._stats.maskBmp?.updateMaxValue(1000 / fps);
       }
-      this.sendResponse<DecodeResponse>('decode', {
-        totalFrames: numFrames,
+      
+      // Set WebGL contexts
+      this.initializeWebGLContext(width, height);
+            
+      // Create frames array
+      const frames: ImageFrame[] = [];
+      
+      // Process all frames
+      for (let i = 0; i < framesData.length; i++) {
+        try {
+          const frameData = framesData[i];
+          const blob = this._base64ToBlob(frameData.data, frameData.mimetype);
+          const bitmap = await createImageBitmap(blob);
+          
+          // Create a VideoFrame from the bitmap
+          const videoFrame = new VideoFrame(bitmap, {
+            timestamp: i * (1000 / fps),
+          });
+          
+          frames.push({
+            bitmap: videoFrame,
+            timestamp: i * (1000 / fps),
+            duration: 1000 / fps,
+          });
+          
+          // If this is the first frame, render it immediately to show progress
+          if (i === 0 && !renderedFirstFrame) {
+            renderedFirstFrame = true;
+            
+            // Initialize effect once first frame was decoded
+            for (const [j, effect] of this._effects.entries()) {
+              const offCanvas =
+                j === EffectIndex.BACKGROUND
+                  ? this._canvasBackground
+                  : this._canvasHighlights;
+              
+              const webglContext =
+                j === EffectIndex.BACKGROUND 
+                  ? this._glBackground 
+                  : this._glObjects;
+              
+              if (offCanvas && webglContext) {
+                await effect.setup({
+                  width,
+                  height,
+                  canvas: offCanvas,
+                  gl: webglContext,
+                });
+              }
+            }
+            
+            this._drawFrame();
+            
+            // Update stats if available
+            this._stats.videoFps?.updateMaxValue(fps);
+            this._stats.total?.updateMaxValue(1000 / fps);
+            this._stats.effect0?.updateMaxValue(1000 / fps);
+            this._stats.effect1?.updateMaxValue(1000 / fps);
+            this._stats.frameBmp?.updateMaxValue(1000 / fps);
+            this._stats.maskBmp?.updateMaxValue(1000 / fps);
+          }
+          
+          bitmap.close();
+          
+          // Send loading progress update every few frames
+          if (i % 10 === 0 || i === framesData.length - 1) {
+            this.sendResponse<DecodeResponse>('decode', {
+              totalFrames: framesData.length,
+              numFrames: i + 1,
+              fps,
+              width,
+              height,
+              done: false,
+            });
+          }
+        } catch (error) {
+          Logger.error(`Failed to process frame ${i}:`, error);
+        }
+      }
+      
+      this._decodedVideo = {
+        frames,
+        width,
+        height,
         numFrames: frames.length,
-        fps: fps,
-        width: width,
-        height: height,
-        done: false,
+        fps,
+      };
+      
+      // Send final update
+      this.sendResponse<DecodeResponse>('decode', {
+        totalFrames: frames.length,
+        numFrames: frames.length,
+        fps,
+        width,
+        height,
+        done: true,
       });
-    });
-
-    if (!renderedFirstFrame) {
-      canvas.width = this._decodedVideo.width;
-      canvas.height = this._decodedVideo.height;
-      this._drawFrame();
+      
+    } catch (error) {
+      Logger.error('Failed to decode image frames:', error);
+      // Send an error response to the main thread
+      this.sendResponse<DecodeResponse>('decode', {
+        error: error instanceof Error ? error.message : String(error),
+        done: true,
+      });
     }
+  }
 
-    this.sendResponse<DecodeResponse>('decode', {
-      totalFrames: this._decodedVideo.numFrames,
-      numFrames: this._decodedVideo.frames.length,
-      fps: this._decodedVideo.fps,
-      width: this._decodedVideo.width,
-      height: this._decodedVideo.height,
-      done: true,
-    });
+  // Helper method to convert base64 to Blob
+  private _base64ToBlob(base64: string, mimetype: string): Blob {
+    const byteCharacters = atob(base64);
+    const byteArrays = [];
+    
+    for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
+      const slice = byteCharacters.slice(offset, offset + 1024);
+      
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      
+      const byteArray = new Uint8Array(byteNumbers);
+      byteArrays.push(byteArray);
+    }
+    
+    return new Blob(byteArrays, { type: mimetype });
   }
 
   private _drawFrame(): void {

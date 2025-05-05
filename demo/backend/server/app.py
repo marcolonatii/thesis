@@ -8,6 +8,7 @@ import logging
 import os
 import atexit
 import signal
+import requests
 import threading # Added for lock check
 from typing import Any, Generator, Tuple
 from io import BytesIO # Added BytesIO
@@ -113,6 +114,98 @@ def healthy() -> Response:
     # status = "OK" if is_model_loaded else "DEGRADED"
     # code = 200 if is_model_loaded else 503
     return make_response("OK", 200)
+
+
+@app.route(f"/{DATA_PATH}/<path:path>/frame_names", methods=["GET"])
+def send_frame_names(path: str) -> Response:
+    """Serves frame names for a given video directory."""
+    try:
+        # Construct the full path to the directory
+        dir_path = DATA_PATH / path
+        
+        # Check if the path exists and is a directory
+        if not os.path.exists(dir_path):
+            logger.warning(f"Directory not found: {dir_path}")
+            return make_response("Directory not found", 404)
+            
+        if not os.path.isdir(dir_path):
+            logger.warning(f"Path is not a directory: {dir_path}")
+            return make_response("Path is not a directory", 400)
+        
+        # Find all image files in the directory
+        image_files = []
+        for ext in ['.jpg', '.jpeg', '.png']:
+            # Use glob to find matching files
+            import glob
+            image_files.extend(glob.glob(str(dir_path / f"*{ext}")))
+            image_files.extend(glob.glob(str(dir_path / f"*{ext.upper()}")))  # Include uppercase extensions
+        
+        # Extract just the filenames
+        filenames = [os.path.basename(f) for f in image_files]
+        filenames.sort()  # Sort for consistent ordering
+        
+        logger.info(f"Found {len(filenames)} frame images in directory: {dir_path}")
+        
+        # Return the list as JSON
+        return jsonify({"frames": filenames})
+    except Exception as e:
+        logger.error(f"Error listing frame names for '{path}': {e}", exc_info=True)
+        return make_response(f"Internal server error: {str(e)}", 500)
+
+
+@app.route(f"/{DATA_PATH}/<path:path>/frames/<filename>", methods=["GET"])
+def get_frame_image(path: str, filename: str) -> Response:
+    """
+    Serves a specific frame image file from a video directory.
+    
+    Args:
+        path: The relative path to the video directory within DATA_PATH
+        filename: The filename of the specific frame to retrieve
+    
+    Returns:
+        The image file as a response
+    """
+    try:
+        # Construct the full path to the image file
+        file_path = DATA_PATH / path / filename
+        
+        # Check if the file exists
+        if not os.path.exists(file_path):
+            logger.warning(f"Frame file not found: {file_path}")
+            return make_response("Frame file not found", 404)
+        
+        if not os.path.isfile(file_path):
+            logger.warning(f"Path exists but is not a file: {file_path}")
+            return make_response("Path is not a file", 400)
+        
+        # Check file size
+        if os.path.getsize(file_path) == 0:
+            logger.warning(f"Frame file exists but is empty (0 bytes): {file_path}")
+            return make_response("Empty file", 404)
+        
+        # Determine the MIME type based on file extension
+        mimetype = None
+        if filename.lower().endswith(('.jpg', '.jpeg')):
+            mimetype = 'image/jpeg'
+        elif filename.lower().endswith('.png'):
+            mimetype = 'image/png'
+        else:
+            # For other file types, let Flask guess the MIME type
+            mimetype = None
+        
+        logger.debug(f"Serving frame file: {file_path} ({os.path.getsize(file_path)} bytes)")
+        
+        # Serve the file
+        return send_file(
+            file_path,
+            mimetype=mimetype,
+            as_attachment=False,
+            conditional=True
+        )
+        
+    except Exception as e:
+        logger.error(f"Error serving frame '{filename}' from path '{path}': {e}", exc_info=True)
+        return make_response(f"Internal server error: {str(e)}", 500)
 
 
 # --- Static File Routes ---
@@ -722,6 +815,104 @@ def clear_videos() -> Response:
     except Exception as e:
         logger.error(f"Unexpected error in /clear_videos endpoint: {str(e)}", exc_info=True)
         return make_response(f"Error clearing videos: {str(e)}", 500)
+
+# @app.route(f"/adp_datasets", methods=["GET"])
+# def get_adp_datasets() -> Response:
+#     """
+#     Serves all ADP datasets in a single response.
+#     """
+#     headers = {
+#         "Authorization": f"Bearer xxxx"
+#     }
+#     try:
+#         response = requests.get("http://localhost:8888/api/v2/version", headers=headers)
+#         return response.json()
+#     except requests.RequestException as e:
+#         logger.error(f"Error connecting to API: {str(e)}", exc_info=True)
+#         return jsonify({"error": f"Failed to connect to API: {str(e)}"}), 502
+
+
+@app.route(f"/{DATA_PATH}/<path:path>/all_frames", methods=["GET"])
+def get_all_frames(path: str) -> Response:
+    """
+    Serves all frames for a video directory in a single response.
+    Returns a JSON object with base64-encoded images.
+    
+    Args:
+        path: The relative path to the video directory within DATA_PATH
+    
+    Returns:
+        JSON response with all frames encoded as base64 strings
+    """
+    try:
+        # Construct the full path to the directory
+        dir_path = DATA_PATH / path
+        
+        # Check if the path exists and is a directory
+        if not os.path.exists(dir_path):
+            logger.warning(f"Directory not found: {dir_path}")
+            return make_response("Directory not found", 404)
+            
+        if not os.path.isdir(dir_path):
+            logger.warning(f"Path is not a directory: {dir_path}")
+            return make_response("Path is not a directory", 400)
+        
+        # Find all image files in the directory
+        image_files = []
+        for ext in ['.jpg', '.jpeg', '.png']:
+            # Use glob to find matching files
+            import glob
+            image_files.extend(glob.glob(str(dir_path / f"*{ext}")))
+            image_files.extend(glob.glob(str(dir_path / f"*{ext.upper()}")))  # Include uppercase extensions
+        
+        # Extract filenames and sort them - matching the approach in misc.py
+        frame_names = [os.path.basename(p) for p in image_files]
+        frame_names.sort()
+        
+        # Map sorted filenames back to full paths
+        sorted_image_files = [os.path.join(dir_path, name) for name in frame_names]
+        
+        # Load and encode all images
+        import base64
+        frames_data = []
+        
+        for file_path in sorted_image_files:
+            filename = os.path.basename(file_path)
+            try:
+                # Read the image file
+                with open(file_path, 'rb') as img_file:
+                    img_data = img_file.read()
+                    
+                # Determine the MIME type based on file extension
+                mimetype = 'image/jpeg'
+                if filename.lower().endswith('.png'):
+                    mimetype = 'image/png'
+                
+                # Encode the image as base64
+                encoded_img = base64.b64encode(img_data).decode('utf-8')
+                
+                # Add to frames data
+                frames_data.append({
+                    'filename': filename,
+                    'data': encoded_img,
+                    'mimetype': mimetype
+                })
+                
+            except Exception as e:
+                logger.error(f"Error processing frame '{filename}': {e}", exc_info=True)
+                # Continue with other frames
+        
+        logger.info(f"Sending {len(frames_data)} frames in a single response for path: {path}")
+        
+        # Return all frames as JSON
+        return jsonify({
+            "frames": frames_data,
+            "count": len(frames_data)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error serving all frames for path '{path}': {e}", exc_info=True)
+        return make_response(f"Internal server error: {str(e)}", 500)
 
 
 # --- Main Execution ---

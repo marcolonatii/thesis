@@ -69,7 +69,6 @@ export default class ReplaceGLEffect extends BaseGLEffect {
     this._maskTextures = preAllocateTextures(gl, 100);
 
     this._bitmap = []; // clear any previous pool of texture
-
     let response = await fetch(angeryIcon);
     let blob = await response.blob();
     const angery = await createImageBitmap(blob);
