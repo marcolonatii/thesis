@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -97,19 +97,6 @@ export default function TrackAndPlayButton() {
   ]);
 
   useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      const callback = {
-        KeyK: handleTrackAndPlay,
-      }[event.code];
-      if (callback != null) {
-        event.preventDefault();
-        callback();
-      }
-    };
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('keydown', handleKey);
-    };
   }, [handleTrackAndPlay]);
 
   return (

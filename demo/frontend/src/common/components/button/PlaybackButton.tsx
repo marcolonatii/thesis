@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,8 +53,9 @@ export default function PlaybackButton() {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      // Removed 'KeyK' binding from here as well
       const callback = {
-        KeyK: handleClick,
+        // KeyK: handleClick,
       }[event.code];
       if (callback != null) {
         event.preventDefault();
@@ -65,10 +66,11 @@ export default function PlaybackButton() {
     return () => {
       document.removeEventListener('keydown', handleKey);
     };
-  }, [handleClick]);
+  }, [handleClick]); // Dependency array remains the same
 
   return (
-    <Tooltip message={`${isPlaying ? 'Pause' : 'Play'} (k)`}>
+    // Tooltip already updated in previous step
+    <Tooltip message={`${isPlaying ? 'Pause' : 'Play'}`}>
       <button
         disabled={isDisabled}
         className={`group !rounded-full !w-10 !h-10 flex items-center justify-center ${getButtonStyles(isDisabled)}`}

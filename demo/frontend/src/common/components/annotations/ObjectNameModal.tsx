@@ -54,13 +54,18 @@ export default function ObjectNameModal({
     onConfirm(value.trim());
   }
 
-  function handleKeyDown(event: React.KeyboardEvent) {
+  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    // Stop propagation to prevent keys typed here from triggering global listeners
+    event.stopPropagation();
+
     if (event.key === 'Enter') {
       event.preventDefault(); // Prevent form submission if inside a form
       onConfirm(value.trim());
     } else if (event.key === 'Escape') {
+      // No need to prevent default for Escape, but stopPropagation is good
       onCancel();
     }
+    // No specific action needed for 'k' here, but stopPropagation() above handles it.
   }
 
   if (!isOpen) {
@@ -84,7 +89,7 @@ export default function ObjectNameModal({
             ref={inputRef}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={handleKeyDown} // Ensure this handler is used
             placeholder="e.g., Car, Person"
             // Consistent styling classes
             className="w-full bg-graydark-800 text-white border-graydark-700 focus:outline-none focus:border-blue-500"
