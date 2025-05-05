@@ -12,6 +12,7 @@ Usage:
 - A classes.txt file is generated with unique object names, sorted alphabetically.
 - Label files (frame_*.txt) are generated using 0-based class indices corresponding
   to the order in classes.txt.
+- **Empty label files are created for frames that have no valid bounding boxes.**
 - Default names like "object_{id}" are used if a name isn't provided by the backend.
 
 The endpoint domain should point to the server where the backend is hosted.
@@ -224,6 +225,7 @@ def save_yolo_data_to_disk(
 
     - Creates `classes.txt` in the output directory.
     - Creates label files (`frame_*.txt`) using the mapped 0-based class indices.
+    - **Crucially, creates an empty label file if a frame has no valid boxes.**
     - Performs validation on bounding box coordinates.
 
     Args:
@@ -248,7 +250,7 @@ def save_yolo_data_to_disk(
 
 
     logging.info("Saving YOLO label files to disk...")
-    frames_saved_count = 0
+    frames_processed_count = 0 # Changed counter name for clarity
     boxes_saved_count = 0
     for frame_data in tqdm(boxes_data, desc="Saving labels", unit="frame"):
         frame_index = frame_data.get("frameIndex")
@@ -258,8 +260,9 @@ def save_yolo_data_to_disk(
 
         filename = os.path.join(output_dir, f"frame_{frame_index:06d}.txt")
         lines = []
-        has_valid_boxes = False # Track if any boxes are written for this frame
+        has_valid_boxes = False # Track if any *valid* boxes are found for this frame
 
+        # Process boxes for the current frame
         for box_obj in frame_data.get("boxes", []):
             original_object_id = box_obj.get("objectId")
             box_values = box_obj.get("box")
@@ -295,21 +298,26 @@ def save_yolo_data_to_disk(
             line = f"{class_index} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
             lines.append(line)
             boxes_saved_count += 1
-            has_valid_boxes = True
+            has_valid_boxes = True # Set flag if at least one valid box is processed
 
-        # Only write file if it contains valid boxes for that frame
-        if has_valid_boxes:
-            try:
-                with open(filename, "w") as f:
+        # Always attempt to write the file for the frame.
+        try:
+            with open(filename, "w") as f:
+                if has_valid_boxes:
                     f.write("\n".join(lines))
-                frames_saved_count += 1
-            except IOError as e:
-                 logging.error("Failed to write label file %s: %s", filename, e)
-                 # Continue to next frame
+                # else: implicitly write nothing, creating an empty file
+            frames_processed_count += 1 # Count frame as processed since file is created/updated
+        except IOError as e:
+             logging.error("Failed to write label file %s: %s", filename, e)
+             # Continue to next frame even if one file fails
+
         # Do not log every single frame save unless debugging is needed
         # logging.debug("Saved labels for frame %d to %s", frame_index, filename)
 
-    logging.info("Finished saving data. Saved %d label files and %d total bounding boxes.", frames_saved_count, boxes_saved_count)
+    logging.info(
+        "Finished saving data. Processed labels for %d frames, saving %d total valid bounding boxes.",
+        frames_processed_count, boxes_saved_count
+    )
 
 
 # --- User Interaction ---
@@ -318,8 +326,21 @@ def select_session(sessions: List[Dict]) -> str:
     """Prompts the user to select a session from a list."""
     print("\nMultiple active sessions found:")
     for i, session in enumerate(sessions, 1):
-        start_time_str = f"{session.get('startTime', 0):.0f}" # Basic timestamp format
+        # Format timestamp nicely if available, otherwise 'N/A' (basic implementation)
+        # A more robust solution would parse the timestamp properly
+        start_time_str = "N/A"
+        start_time = session.get("startTime")
+        if start_time:
+            try:
+                # Assuming timestamp is seconds since epoch
+                from datetime import datetime, timezone
+                dt_object = datetime.fromtimestamp(start_time, timezone.utc)
+                start_time_str = dt_object.strftime('%Y-%m-%d %H:%M:%S %Z')
+            except:
+                start_time_str = f"{start_time:.0f}" # Fallback to raw number
+
         print(f"{i}. Session ID: {session.get('sessionId', 'N/A')}, "
+              f"Started: {start_time_str}, "
               f"Frames: {session.get('numFrames', 'N/A')}, "
               f"Objects: {session.get('numObjects', 'N/A')}")
     print(f"{len(sessions) + 1}. Exit")
@@ -400,24 +421,21 @@ def main():
         if not boxes_result:
             logging.warning("No bounding box data returned from the backend for session %s.", session_id_to_use)
             print(f"\nWarning: No bounding box data found for session {session_id_to_use}.")
-            # Exit gracefully even if no boxes, maybe the video had none
-            exit(0)
+            # Save empty classes.txt and create output dir if they don't exist
+            save_yolo_data_to_disk([], args.output_dir, {}, "")
+            print(f"\nCreated output directory {args.output_dir} and an empty classes.txt.")
+            exit(0) # Exit gracefully
 
         # Process names and create mappings
         object_id_map, classes_content = process_names_and_create_mapping(boxes_result)
 
-        if not classes_content:
-             logging.warning("No class names generated (no objects found?). Saving empty classes.txt and no labels.")
-             # Still save empty classes.txt for consistency
-             save_yolo_data_to_disk([], args.output_dir, {}, "")
-        else:
-            # Save the data using the new function
-            save_yolo_data_to_disk(boxes_result, args.output_dir, object_id_map, classes_content)
+        # Always call save_yolo_data_to_disk, it handles empty classes/boxes correctly now
+        save_yolo_data_to_disk(boxes_result, args.output_dir, object_id_map, classes_content)
 
         print(f"\nSuccessfully saved YOLO data to {args.output_dir}")
 
     except SystemExit as e:
-        # Raised by select_session on user exit
+        # Raised by select_session on user exit or other explicit exits
         print(f"\n{str(e)}")
         exit(0)
     except Exception as e:

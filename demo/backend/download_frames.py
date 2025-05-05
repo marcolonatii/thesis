@@ -90,7 +90,7 @@ def select_session(sessions: List[Dict]) -> str:
     for i, session in enumerate(sessions, 1):
         print(f"{i}. Session ID: {session['sessionId']}, Frames: {session['numFrames']}, Objects: {session['numObjects']}")
     print(f"{len(sessions) + 1}. Exit")
-    
+
     while True:
         try:
             choice = int(input(f"\nEnter the number of the session to download (1-{len(sessions) + 1}): "))
@@ -139,12 +139,16 @@ def download_frames(session_id: str, frames_endpoint: str) -> Generator[Tuple[in
         raise requests.RequestException(f"Failed to download frames: {str(e)}")
 
     content_type = response.headers.get("Content-Type", "")
-    if content_type.startswith("multipart/x-savi-stream"):
+    if content_type.startswith("multipart/x-mixed-replace"):
         # Extract the boundary string without CRLF
-        boundary_str = response.headers["Content-Type"].split("boundary=")[1]
-        boundary = b"--" + boundary_str.encode("utf-8")
+        try:
+            boundary_str = content_type.split("boundary=")[1]
+            boundary = b"--" + boundary_str.encode("utf-8")
+        except IndexError:
+             raise ValueError(f"Could not extract boundary from Content-Type: {content_type}")
     else:
-        raise ValueError("Unexpected response Content-Type; expected multipart/x-savi-stream")
+        # Updated error message to reflect the new expectation
+        raise ValueError(f"Unexpected response Content-Type: {content_type}; expected multipart/x-mixed-replace")
 
     buffer = b""
     frame_count = 0
@@ -260,7 +264,7 @@ def main():
                 print(f"Using the only active session: {session_id}")
             else:
                 session_id = select_session(sessions)
-        
+
         logging.info("Starting frame download for session %s", session_id)
         # Download frames from the backend using the constructed frames endpoint
         frames = download_frames(session_id, frames_endpoint)
