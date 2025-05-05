@@ -61,7 +61,63 @@ def transcode(
     )
 
 
+def get_rotation_from_matrix(matrix) -> int:
+    """
+    Extracts the rotation angle in degrees from a DISPLAYMATRIX side data.
+    The matrix is a 3x3 rotation matrix stored as a bytes object in PyAV.
+    Returns 0, 90, 180, or 270 based on the dominant rotation.
+
+    Args:
+        matrix: Bytes object representing the 3x3 rotation matrix from PyAV side data.
+
+    Returns:
+        int: Rotation angle in degrees (0, 90, 180, 270).
+    """
+    # DISPLAYMATRIX is a 9-element 32-bit float array (36 bytes)
+    # See: https://ffmpeg.org/doxygen/trunk/structAVFrameSideData.html
+    if not matrix or len(matrix) != 36:
+        return 0
+
+    import struct
+
+    # Unpack the 9 floats from the 36-byte buffer
+    values = struct.unpack("9f", matrix)
+    # Matrix layout: [m00, m01, m02, m10, m11, m12, m20, m21, m22]
+    m00, m01, _, m10, m11, _, _, _, _ = values
+
+    # Normalize small values to zero to avoid floating-point noise
+    def norm(val):
+        return 0 if abs(val) < 0.0001 else val
+
+    m00, m01, m10, m11 = norm(m00), norm(m01), norm(m10), norm(m11)
+
+    # Determine rotation based on the 2D rotation matrix components
+    # [cosθ, -sinθ]
+    # [sinθ,  cosθ]
+    if m00 == 1 and m11 == 1:  # Identity matrix
+        return 0
+    elif m00 == 0 and m11 == 0 and m01 == -1 and m10 == 1:  # 90°
+        return 90
+    elif m00 == -1 and m11 == -1 and m01 == 0 and m10 == 0:  # 180°
+        return 180
+    elif m00 == 0 and m11 == 0 and m01 == 1 and m10 == -1:  # 270°
+        return 270
+    else:
+        # Unrecognized matrix; default to no rotation
+        return 0
+
+
 def get_video_metadata(path: str) -> VideoMetadata:
+    """
+    Extracts metadata from a video file, including duration, resolution, frame rate,
+    and rotation. Handles cases where side data (e.g., rotation) is unavailable.
+
+    Args:
+        path (str): Path to the video file.
+
+    Returns:
+        VideoMetadata: Object containing extracted video metadata.
+    """
     with av.open(path) as cont:
         num_video_streams = len(cont.streams.video)
         width, height, fps = None, None, None
@@ -70,12 +126,22 @@ def get_video_metadata(path: str) -> VideoMetadata:
         video_start_time = 0.0
         rotation_deg = 0
         num_video_frames = 0
+
         if num_video_streams > 0:
             video_stream = cont.streams.video[0]
             assert video_stream.time_base is not None
 
-            # for rotation, see: https://github.com/PyAV-Org/PyAV/pull/1249
-            rotation_deg = video_stream.side_data.get("DISPLAYMATRIX", 0)
+            # Extract rotation by decoding the first frame
+            # Side data like DISPLAYMATRIX is frame-level in modern PyAV
+            for packet in cont.demux(video_stream):
+                for frame in packet.decode():
+                    if hasattr(frame, "side_data") and frame.side_data:
+                        display_matrix = frame.side_data.get("DISPLAYMATRIX")
+                        if display_matrix:
+                            rotation_deg = get_rotation_from_matrix(display_matrix)
+                    break  # Only need the first frame with side data
+                break  # Only need the first packet
+
             num_video_frames = video_stream.frames
             video_start_time = float(video_stream.start_time * video_stream.time_base)
             width, height = video_stream.width, video_stream.height

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import ClearAllPointsInVideoButton from '@/common/components/annotations/ClearAllPointsInVideoButton';
-import CloseSessionButton from '@/common/components/annotations/CloseSessionButton';
+import ProceedToDownloadButton from '@/common/components/annotations/ProceedToDownload';
 import TrackAndPlayButton from '@/common/components/button/TrackAndPlayButton';
 import ToolbarBottomActionsWrapper from '@/common/components/toolbar/ToolbarBottomActionsWrapper';
 import {
@@ -45,7 +45,7 @@ export default function ObjectsToolbarBottomActions({onTabChange}: Props) {
       />
       {isTrackingEnabled && <TrackAndPlayButton />}
       {streamingState === 'full' && (
-        <CloseSessionButton onSessionClose={handleSwitchToEffectsTab} />
+        <ProceedToDownloadButton onSwitchToEffectsTab={handleSwitchToEffectsTab} />
       )}
     </ToolbarBottomActionsWrapper>
   );

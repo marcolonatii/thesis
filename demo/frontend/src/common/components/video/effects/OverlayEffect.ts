@@ -24,21 +24,23 @@ import fragmentShaderSource from '@/common/components/video/effects/shaders/Over
 import {Tracklet} from '@/common/tracker/Tracker';
 import {
   findIndexByTrackletId,
-  preAllocateTextures,
 } from '@/common/utils/ShaderUtils';
 import {RLEObject, decode} from '@/jscocotools/mask';
 import invariant from 'invariant';
 import {CanvasForm} from 'pts';
+import Logger from '@/common/logger/Logger';
 
 export default class OverlayEffect extends BaseGLEffect {
   private _numMasks: number = 0;
   private _numMasksUniformLocation: WebGLUniformLocation | null = null;
-
-  // Must start from 1, main texture takes 0.
-  private _masksTextureUnitStart: number = 1;
-  private _maskTextures: WebGLTexture[] = [];
+  private _maskTexturesLocation: WebGLUniformLocation | null = null;
+  private _maskColorsLocation: WebGLUniformLocation | null = null;
+  private _maskTextureArray: WebGLTexture | null = null;
   private _clickPosition: number[] | null = null;
   private _activeMask: number = 0;
+
+  // Maximum number of masks supported, matching the shader's MAX_MASKS
+  private static readonly MAX_MASKS: number = 100;
 
   constructor() {
     super(8);
@@ -54,10 +56,34 @@ export default class OverlayEffect extends BaseGLEffect {
     super.setupUniforms(gl, program, init);
 
     this._numMasksUniformLocation = gl.getUniformLocation(program, 'uNumMasks');
+    this._maskTexturesLocation = gl.getUniformLocation(program, 'uMaskTextures');
+    this._maskColorsLocation = gl.getUniformLocation(program, 'uMaskColors[0]');
+
     gl.uniform1i(this._numMasksUniformLocation, this._numMasks);
 
-    // We know the max number of textures, pre-allocate 3.
-    this._maskTextures = preAllocateTextures(gl, 3);
+    this._maskTextureArray = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._maskTextureArray);
+    gl.texImage3D(
+      gl.TEXTURE_2D_ARRAY,
+      0,
+      gl.LUMINANCE,
+      init.height, // Swap to height
+      init.width,  // Swap to width
+      OverlayEffect.MAX_MASKS,
+      0,
+      gl.LUMINANCE,
+      gl.UNSIGNED_BYTE,
+      null,
+    );
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    gl.uniform1i(this._maskTexturesLocation, 1);
+
+    gl.uniform2f(gl.getUniformLocation(program, 'uSize'), init.width, init.height);
   }
 
   apply(form: CanvasForm, context: EffectFrameContext, _tracklets: Tracklet[]) {
@@ -65,7 +91,17 @@ export default class OverlayEffect extends BaseGLEffect {
     const program = this._program;
 
     invariant(gl !== null, 'WebGL2 context is required');
-    invariant(program !== null, 'Not WebGL program found');
+    invariant(program !== null, 'No WebGL program found');
+
+    Logger.debug(`Applying effect: masks.length=${context.masks.length}, maskColors.length=${context.maskColors?.length || 0}, tracklets.length=${_tracklets.length}`);
+
+    if (context.masks.length === 0) {
+      Logger.warn('No masks provided in context. Skipping effect application.');
+      const ctx = form.ctx;
+      invariant(this._canvas !== null, 'Canvas is required');
+      ctx.drawImage(context.frame, 0, 0);
+      return;
+    }
 
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -73,10 +109,9 @@ export default class OverlayEffect extends BaseGLEffect {
     const opacity = [0.5, 0.75, 0.35, 0.95][this.variant % 4];
     gl.uniform1f(
       gl.getUniformLocation(program, 'uTime'),
-      context.timeParameter ?? 1.5, // Pass a constant value when no time parameter
+      context.timeParameter ?? 1.5,
     );
     gl.uniform1f(gl.getUniformLocation(program, 'uOpacity'), opacity);
-    gl.uniform1i(this._numMasksUniformLocation, context.masks.length);
     gl.uniform1i(
       gl.getUniformLocation(program, 'uBorder'),
       this.variant % this.numVariants < 4 ? 1 : 0,
@@ -103,7 +138,6 @@ export default class OverlayEffect extends BaseGLEffect {
       this._activeMask,
     );
 
-    // Activate original frame texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this._frameTexture);
     gl.texImage2D(
@@ -120,53 +154,73 @@ export default class OverlayEffect extends BaseGLEffect {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
-    context.masks.forEach((mask, index) => {
+    const numMasks = Math.min(context.masks.length, OverlayEffect.MAX_MASKS);
+    gl.uniform1i(this._numMasksUniformLocation, numMasks);
+
+    if (numMasks < context.masks.length) {
+      Logger.warn(`Mask count ${context.masks.length} exceeds MAX_MASKS ${OverlayEffect.MAX_MASKS}. Truncating to ${numMasks}.`);
+    }
+
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this._maskTextureArray);
+    for (let index = 0; index < numMasks; index++) {
+      const mask = context.masks[index];
       const decodedMask = decode([mask.bitmap as RLEObject]);
       const maskData = decodedMask.data as Uint8Array;
-      gl.activeTexture(gl.TEXTURE0 + index + this._masksTextureUnitStart);
-      gl.bindTexture(gl.TEXTURE_2D, this._maskTextures[index]);
-
-      gl.uniform1i(
-        gl.getUniformLocation(program, `uMaskTexture${index}`),
-        this._masksTextureUnitStart + index,
-      );
-
-      const color = hexToRgb(context.maskColors[index]);
-      gl.uniform4f(
-        gl.getUniformLocation(program, `uMaskColor${index}`),
-        color.r,
-        color.g,
-        color.b,
-        color.a,
-      );
-
-      // 1 byte aligment
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
+      gl.texSubImage3D(
+        gl.TEXTURE_2D_ARRAY,
         0,
-        gl.LUMINANCE,
-        context.height,
-        context.width,
         0,
+        0,
+        index,
+        context.height, // Swap to height
+        context.width,  // Swap to width
+        1,
         gl.LUMINANCE,
         gl.UNSIGNED_BYTE,
         maskData,
       );
-    });
+    }
+
+    if (!Array.isArray(context.maskColors) || context.maskColors.length < numMasks) {
+      Logger.warn(`Invalid or insufficient maskColors: ${JSON.stringify(context.maskColors)}. Using fallback colors.`);
+    }
+
+    const colorArray = new Float32Array(4 * numMasks);
+    for (let index = 0; index < numMasks; index++) {
+      let color;
+      try {
+        const hexColor = context.maskColors && context.maskColors[index] ? context.maskColors[index] : '#808080';
+        color = hexToRgb(hexColor);
+        if (!color || typeof color.r !== 'number') {
+          throw new Error(`Invalid color from hexToRgb for mask ${index}`);
+        }
+      } catch (e) {
+        Logger.error(`Failed to parse color for mask ${index}: ${e}. Using fallback.`);
+        color = { r: 128, g: 128, b: 128, a: 255 };
+      }
+      colorArray[index * 4 + 0] = color.r / 255.0;
+      colorArray[index * 4 + 1] = color.g / 255.0;
+      colorArray[index * 4 + 2] = color.b / 255.0;
+      colorArray[index * 4 + 3] = color.a / 255.0;
+    }
+
+    if (!(colorArray instanceof Float32Array) || colorArray.length === 0) {
+      Logger.error('colorArray is invalid or empty. This should not happen with valid numMasks.');
+    } else if (this._maskColorsLocation !== null) {
+      gl.uniform4fv(this._maskColorsLocation, colorArray);
+    } else {
+      Logger.error('maskColors uniform location is null. Cannot set colors.');
+    }
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // Unbind textures
     gl.bindTexture(gl.TEXTURE_2D, null);
-    context.masks.forEach((_, index) => {
-      gl.activeTexture(gl.TEXTURE0 + index + this._masksTextureUnitStart);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-    });
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
 
     const ctx = form.ctx;
-    invariant(this._canvas !== null, 'canvas is required');
-
+    invariant(this._canvas !== null, 'Canvas is required');
     ctx.drawImage(this._canvas, 0, 0);
     this._clickPosition = null;
   }
@@ -174,14 +228,9 @@ export default class OverlayEffect extends BaseGLEffect {
   async cleanup(): Promise<void> {
     super.cleanup();
 
-    if (this._gl != null) {
-      // Delete mask textures to prevent memory leaks
-      this._maskTextures.forEach(texture => {
-        if (texture != null && this._gl != null) {
-          this._gl.deleteTexture(texture);
-        }
-      });
-      this._maskTextures = [];
+    if (this._gl != null && this._maskTextureArray != null) {
+      this._gl.deleteTexture(this._maskTextureArray);
+      this._maskTextureArray = null;
     }
   }
 }

@@ -1,0 +1,273 @@
+# demo/frontend/schema.graphql
+# --- Added Input/Response Types ---
+input SetObjectNameInput {
+  sessionId: String!
+  objectId: Int!
+  name: String!
+}
+
+type SetObjectNameResponse {
+  success: Boolean!
+  objectId: Int!
+  name: String # Changed to nullable string to match backend logic
+}
+
+input DownloadMasksInput {
+  sessionId: String!
+}
+
+type DownloadMasksResponse {
+  masks: [RLEMaskListOnFrame!]!
+}
+
+input DownloadBoxesInput {
+  sessionId: String!
+  format: String!
+}
+
+type DownloadBoxesResponse {
+  boxes: [BoxesListOnFrame!]!
+}
+
+# --- Existing Types (with modifications) ---
+input AddPointsInput {
+  sessionId: String!
+  frameIndex: Int!
+  clearOldPoints: Boolean!
+  objectId: Int!
+  labels: [Int!]!
+  points: [[Float!]!]!
+}
+
+type CancelPropagateInVideo {
+  success: Boolean!
+}
+
+input CancelPropagateInVideoInput {
+  sessionId: String!
+}
+
+input ClearPointsInFrameInput {
+  sessionId: String!
+  frameIndex: Int!
+  objectId: Int!
+}
+
+type ClearPointsInVideo {
+  success: Boolean!
+}
+
+input ClearPointsInVideoInput {
+  sessionId: String!
+}
+
+type CloseSession {
+  success: Boolean!
+}
+
+input CloseSessionInput {
+  sessionId: String!
+}
+
+type Mutation {
+  startSession(input: StartSessionInput!): StartSession!
+  closeSession(input: CloseSessionInput!): CloseSession!
+  addPoints(input: AddPointsInput!): RLEMaskListOnFrame!
+  clearPointsInFrame(input: ClearPointsInFrameInput!): RLEMaskListOnFrame!
+  clearPointsInVideo(input: ClearPointsInVideoInput!): ClearPointsInVideo!
+  removeObject(input: RemoveObjectInput!): [RLEMaskListOnFrame!]!
+  cancelPropagateInVideo(
+    input: CancelPropagateInVideoInput!
+  ): CancelPropagateInVideo!
+  # createDeletionId: String! # Assuming these are old/unused? Commenting out.
+  # acceptTos: Boolean!
+  # acceptTermsOfService: String!
+  uploadVideo(
+    file: Upload!
+    startTimeSec: Float = null
+    durationTimeSec: Float = null
+  ): Video!
+  # uploadSharedVideo(file: Upload!): SharedVideo! # Assuming old/unused?
+  # uploadAnnotations(file: Upload!): Boolean! # Assuming old/unused?
+  # --- Added Mutations ---
+  setObjectName(input: SetObjectNameInput!): SetObjectNameResponse!
+  downloadMasks(input: DownloadMasksInput!): DownloadMasksResponse!
+  downloadBoxes(input: DownloadBoxesInput!): DownloadBoxesResponse!
+}
+
+input PingInput {
+  sessionId: String!
+}
+
+type Pong {
+  success: Boolean!
+}
+
+# --- Added SessionInfo ---
+type SessionInfo {
+  session_id: String!
+  start_time: Float!
+  last_use_time: Float!
+  num_frames: Int!
+  num_objects: Int!
+}
+
+type Query {
+  # ping(input: PingInput!): Pong! # This seems missing from backend schema.py?
+  defaultVideo: Video!
+  videos(
+    """
+    Returns the items in the list that come before the specified cursor.
+    """
+    before: String = null
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
+    after: String = null
+    """
+    Returns the first n items from the list.
+    """
+    first: Int = null
+    """
+    Returns the items in the list that come after the specified cursor.
+    """
+    last: Int = null
+  ): VideoConnection!
+  # sharedVideo(path: String!): SharedVideo! # Seems missing from backend schema.py?
+  sessions: [SessionInfo!]! # Added sessions query
+}
+
+type RLEMask {
+  size: [Int!]!
+  counts: String!
+  order: String!
+}
+
+type RLEMaskForObject {
+  objectId: Int!
+  rleMask: RLEMask!
+  name: String # --- Added optional name field ---
+}
+
+type RLEMaskListOnFrame {
+  frameIndex: Int!
+  rleMaskList: [RLEMaskForObject!]!
+}
+
+# --- Added YOLO Box Type ---
+type YOLOBoxForObject {
+  object_id: Int!
+  box: [Float!]!
+  name: String # --- Added optional name field ---
+}
+
+# --- Added Boxes List Type ---
+type BoxesListOnFrame {
+  frame_index: Int!
+  boxes: [YOLOBoxForObject!]!
+}
+
+
+input RemoveObjectInput {
+  sessionId: String!
+  objectId: Int!
+}
+
+type StartSession {
+  sessionId: String!
+}
+
+input StartSessionInput {
+  path: String!
+}
+
+"""
+The `ID` scalar type represents a unique identifier, often used to refetch an object or as key for a cache. The ID type appears in a JSON response as a String; however, it is not intended to be human-readable. When expected as an input type, any string (such as `"4"`) or integer (such as `4`) input value will be accepted as an ID.
+"""
+scalar GlobalID @specifiedBy(url: "https://relay.dev/graphql/objectidentification.htm")
+
+"""
+An object with a Globally Unique ID
+"""
+interface Node {
+  """
+  The Globally Unique ID of this object
+  """
+  id: GlobalID!
+}
+
+"""
+Information to aid in pagination.
+"""
+type PageInfo {
+  """
+  When paginating forwards, are there more items?
+  """
+  hasNextPage: Boolean!
+  """
+  When paginating backwards, are there more items?
+  """
+  hasPreviousPage: Boolean!
+  """
+  When paginating backwards, the cursor to continue.
+  """
+  startCursor: String
+  """
+  When paginating forwards, the cursor to continue.
+  """
+  endCursor: String
+}
+
+# type SharedVideo { # Seems missing from backend schema.py?
+#   path: String!
+#   url: String!
+# }
+
+scalar Upload
+
+type Video implements Node {
+  """
+  The Globally Unique ID of this object
+  """
+  id: GlobalID!
+  code: GlobalID! # Added code based on python type Video(relay.Node)
+  path: String!
+  posterPath: String
+  width: Int!
+  height: Int!
+  url: String!
+  posterUrl: String!
+}
+
+"""
+A connection to a list of items.
+"""
+type VideoConnection {
+  """
+  Pagination data for this connection
+  """
+  pageInfo: PageInfo!
+  """
+  Contains the nodes in this connection
+  """
+  edges: [VideoEdge!]!
+}
+
+"""
+An edge in a connection.
+"""
+type VideoEdge {
+  """
+  A cursor for use in pagination
+  """
+  cursor: String!
+  """
+  The item at the end of the edge
+  """
+  node: Video!
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+}

@@ -18,20 +18,19 @@ import useVideo from '@/common/components/video/editor/useVideo';
 import {ChevronRight} from '@carbon/icons-react';
 
 type Props = {
-  onSessionClose: () => void;
+  onSwitchToEffectsTab: () => void;
 };
 
-export default function CloseSessionButton({onSessionClose}: Props) {
+export default function ProceedToDownloadButton({onSwitchToEffectsTab}: Props) {
   const video = useVideo();
 
-  function handleCloseSession() {
-    video?.closeSession();
+  function handleProceed() {
     video?.logAnnotations();
-    onSessionClose();
+    onSwitchToEffectsTab();
   }
 
   return (
-    <PrimaryCTAButton onClick={handleCloseSession} endIcon={<ChevronRight />}>
+    <PrimaryCTAButton onClick={handleProceed} endIcon={<ChevronRight />}>
       Good to go
     </PrimaryCTAButton>
   );

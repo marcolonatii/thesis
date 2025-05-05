@@ -84,8 +84,6 @@ export type TrackletObject = {
   isInitialized: boolean;
 };
 
-const MAX_NUMBER_TRACKLET_OBJECTS = 3;
-
 export const activeTrackletObjectIdAtom = atom<number | null>(0);
 
 export const activeTrackletObjectAtom = atom<BaseTracklet | null>(get => {
@@ -101,9 +99,7 @@ export const maxTrackletObjectIdAtom = atom<number>(get => {
   return tracklets.reduce((prev, curr) => Math.max(prev, curr.id), 0);
 });
 
-export const isTrackletObjectLimitReachedAtom = atom<boolean>(
-  get => get(trackletObjectsAtom).length >= MAX_NUMBER_TRACKLET_OBJECTS,
-);
+export const isTrackletObjectLimitReachedAtom = atom(false);
 
 export const areTrackletObjectsInitializedAtom = atom<boolean>(get =>
   get(trackletObjectsAtom).every(obj => obj.isInitialized),
@@ -125,12 +121,7 @@ export const labelTypeAtom = atom<'positive' | 'negative'>('positive');
 export const isAddObjectEnabledAtom = atom<boolean>(get => {
   const session = get(sessionAtom);
   const trackletsInitialized = get(areTrackletObjectsInitializedAtom);
-  const isObjectLimitReached = get(isTrackletObjectLimitReachedAtom);
-  return (
-    session?.ranPropagation === false &&
-    trackletsInitialized &&
-    !isObjectLimitReached
-  );
+  return session?.ranPropagation === false && trackletsInitialized;
 });
 
 export const codeEditorOpenedAtom = atom<boolean>(false);
@@ -181,3 +172,9 @@ export const messageMapAtom = atom<MessagesEventMap>(defaultMessageMap);
 export const uploadingStateAtom = atom<'default' | 'uploading' | 'error'>(
   'default',
 );
+
+// #####################
+// Tracklet Names
+// #####################
+
+export const trackletNamesAtom = atom<{ [id: number]: string }>({});

@@ -120,7 +120,6 @@ export class SAM2Model extends Tracker {
     // Reset streaming state. Force update with the true flag to make sure the
     // UI updates its state.
     this._updateStreamingState('none', true);
-
     return new Promise(resolve => {
       try {
         commitMutation<SAM2ModelStartSessionMutation>(this._environment, {

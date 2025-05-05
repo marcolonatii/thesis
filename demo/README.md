@@ -1,6 +1,15 @@
-# SAM 2 Demo
+# SAM 2 Demo - Unrestricted
 
-Welcome to the SAM 2 Demo! This project consists of a frontend built with React TypeScript and Vite and a backend service using Python Flask and Strawberry GraphQL. Both components can be run in Docker containers or locally on MPS (Metal Performance Shaders) or CPU. However, running the backend service on MPS or CPU devices may result in significantly slower performance (FPS).
+Welcome to the unrestricted SAM 2 Demo! The [original SAM2 demo app](https://github.com/facebookresearch/sam2/tree/sam2.1/demo) includes limits on the number of objects you can create, and has no way to download masks once they've been created. This repo solves that.
+
+- ✅ Fix docker-compose build issues
+- ✅ Fix PyAV missing side_data issue preventing custom video uploads by extracting rotation information manually
+- ✅ Add support for running this interface and backend on a remote machine (see updated docker-compose.yaml for example environemnt variable setting)
+- ✅ Remove limit of 3 objects from the UI.
+- ️✅ Add support for up to 15 object mask colors (limited by WebGL)
+- ️✅ Add `download_masks` graphql endpoint to the server
+- ✅ Improve server-side logging to terminal to display session ID
+- ️✅ Include [download_masks.py](demo/backend/download_masks.py) utility script, and [masks_to_boxes.py](demo/backend/masks_to_boxes.py) and [viz_boxes.py](demo/backend/viz_boxes.py) for those interested in bounding boxes
 
 ## Prerequisites
 

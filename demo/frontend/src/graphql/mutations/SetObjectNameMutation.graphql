@@ -1,0 +1,7 @@
+mutation SetObjectNameMutation($input: SetObjectNameInput!) {
+  setObjectName(input: $input) {
+    success
+    object_id
+    name
+  }
+}

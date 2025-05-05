@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +18,12 @@ import ObjectsToolbarBottomActions from '@/common/components/annotations/Objects
 import {getObjectLabel} from '@/common/components/annotations/ObjectUtils';
 import ToolbarObject from '@/common/components/annotations/ToolbarObject';
 import MobileFirstClickBanner from '@/common/components/MobileFirstClickBanner';
-import {activeTrackletObjectAtom, isFirstClickMadeAtom} from '@/demo/atoms';
-import {useAtomValue} from 'jotai';
+import {
+  activeTrackletObjectAtom,
+  isFirstClickMadeAtom,
+  trackletNamesAtom, // Import trackletNamesAtom
+} from '@/demo/atoms';
+import {useAtomValue} from 'jotai'; // Keep useAtomValue
 
 type Props = {
   onTabChange: (newIndex: number) => void;
@@ -28,6 +32,7 @@ type Props = {
 export default function MobileObjectsToolbar({onTabChange}: Props) {
   const activeTracklet = useAtomValue(activeTrackletObjectAtom);
   const isFirstClickMade = useAtomValue(isFirstClickMadeAtom);
+  const trackletNames = useAtomValue(trackletNamesAtom); // Get tracklet names here
 
   if (!isFirstClickMade) {
     return <MobileFirstClickBanner />;
@@ -38,7 +43,8 @@ export default function MobileObjectsToolbar({onTabChange}: Props) {
       <MobileObjectsToolbarHeader />
       {activeTracklet != null && (
         <ToolbarObject
-          label={getObjectLabel(activeTracklet)}
+          // Pass trackletNames to getObjectLabel
+          label={getObjectLabel(activeTracklet, trackletNames)}
           tracklet={activeTracklet}
           isActive={true}
           isMobile={true}

@@ -76,7 +76,7 @@ export default function VideoFilmstrip() {
   const selectedFrameHelper = useMemo(() => new SelectedFrameHelper(1, 1), []);
   const setSelectedFrameHelper = useSetAtom(selectedFrameHelperAtom);
 
-  const fpsRef = useRef<number>(30);
+  const fpsRef = useRef<number>(5);
 
   useEffect(() => {
     function onDecode(event: DecodeEvent) {

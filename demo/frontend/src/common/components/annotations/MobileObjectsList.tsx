@@ -33,6 +33,8 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: spacing[5],
+    overflowX: 'auto', // Enable horizontal scrolling
+    whiteSpace: 'nowrap', // Prevent wrapping
   },
 });
 

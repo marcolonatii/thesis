@@ -1,38 +1,66 @@
+# File: docker-compose.yaml
 services:
   frontend:
-    image: sam2/frontend
+    image: sam2/frontend-dev
     build:
       context: ./demo/frontend
       dockerfile: frontend.Dockerfile
+      target: development
+      args:
+        # API URL needed by the app running in the browser (points to backend on host)
+        - REACT_APP_API_URL=http://localhost:7263
     ports:
-      - 7262:80
+      # Map host port 7262 to container's React dev server port 3000
+      - "7262:5173"
+    volumes:
+      # Mount the frontend source code into the container for hot-reloading
+      # Note: Adjust path if your docker-compose.yaml is not in the root sam2 directory
+      - ./demo/frontend:/app
+      # Use a named volume or anonymous volume to prevent host node_modules
+      # from overwriting container node_modules (important for different OS/arch)
+      - /app/node_modules
+    environment:
+      # For Docker volume watching, polling might be necessary
+      - CHOKIDAR_USEPOLLING=true
+      # Set Node env (though Dockerfile stage already does)
+      - NODE_ENV=development
+      # REACT_APP_* vars are usually baked in at build time via args,
+      # but setting it here *might* be picked up by some dev server setups. Primary way is build args.
+      # - REACT_APP_API_URL=http://localhost:7263
+    # Depends on backend if the dev server needs to proxy requests,
+    # but usually API calls go directly from browser to localhost:7263
+    # depends_on:
+    #  - backend
 
   backend:
     image: sam2/backend
     build:
       context: .
       dockerfile: backend.Dockerfile
+      args: # Pass MODEL_SIZE as build arg if needed by Dockerfile
+        - MODEL_SIZE=large
     ports:
-      - 7263:5000
+      # Map host port 7263 to container's Gunicorn port 5000
+      - "7263:5000"
     volumes:
       - ./demo/data/:/data/:rw
+      - /home/justin/applied2/customer/example/sim/datasets:/datasets:ro
     environment:
       - SERVER_ENVIRONMENT=DEV
       - GUNICORN_WORKERS=1
-      # Inference API needs to have at least 2 threads to handle an incoming
-      # parallel cancel propagation request
-      - GUNICORN_THREADS=2
+      - GUNICORN_THREADS=1 # Reduced for dev is fine
       - GUNICORN_PORT=5000
-      - API_URL=http://localhost:7263
-      - DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4
-      # # ffmpeg/video encode settings
-      - FFMPEG_NUM_THREADS=1
+      - MODEL_SIZE=base_plus # Also set as runtime env var
+      - API_URL=http://localhost:7263 # Backend uses this to construct URLs returned to frontend
+      - DEFAULT_VIDEO_PATH=/datasets/test_sam2_data_1
+      - FFMPEG_NUM_THREADS=64 # Adjust as needed
+      - DATA_PATH=/datasets
       - VIDEO_ENCODE_CODEC=libx264
       - VIDEO_ENCODE_CRF=23
       - VIDEO_ENCODE_FPS=24
       - VIDEO_ENCODE_MAX_WIDTH=1280
       - VIDEO_ENCODE_MAX_HEIGHT=720
-      - VIDEO_ENCODE_VERBOSE=False
+      - VIDEO_ENCODE_VERBOSE=True
     deploy:
       resources:
         reservations:

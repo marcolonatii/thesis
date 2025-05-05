@@ -73,7 +73,7 @@ export default class VibrantMaskEffect extends BaseGLEffect {
     gl.uniform1f(this._currentFrameLocation, 0);
 
     // We know the max number of textures, pre-allocate 3.
-    this._maskTextures = preAllocateTextures(gl, 3);
+    this._maskTextures = preAllocateTextures(gl, 100);
 
     this._lutTextures = []; // clear any previous pool of textures
 

@@ -1,3 +1,32 @@
+input SetObjectNameInput {
+  sessionId: String!
+  objectId: Int!
+  name: String!
+}
+
+type SetObjectNameResponse {
+  success: Boolean!
+  objectId: Int!
+  name: String
+}
+
+input DownloadMasksInput {
+  sessionId: String!
+}
+
+type DownloadMasksResponse {
+  masks: [RLEMaskListOnFrame!]!
+}
+
+input DownloadBoxesInput {
+  sessionId: String!
+  format: String!
+}
+
+type DownloadBoxesResponse {
+  boxes: [BoxesListOnFrame!]!
+}
+
 input AddPointsInput {
   sessionId: String!
   frameIndex: Int!
@@ -47,14 +76,17 @@ type Mutation {
   cancelPropagateInVideo(
     input: CancelPropagateInVideoInput!
   ): CancelPropagateInVideo!
-  createDeletionId: String!
-  acceptTos: Boolean!
-  acceptTermsOfService: String!
   uploadVideo(
     file: Upload!
     startTimeSec: Float = null
     durationTimeSec: Float = null
   ): Video!
+  setObjectName(input: SetObjectNameInput!): SetObjectNameResponse!
+  downloadMasks(input: DownloadMasksInput!): DownloadMasksResponse!
+  downloadBoxes(input: DownloadBoxesInput!): DownloadBoxesResponse!
+  createDeletionId: String!
+  acceptTos: Boolean!
+  acceptTermsOfService: String!
   uploadSharedVideo(file: Upload!): SharedVideo!
   uploadAnnotations(file: Upload!): Boolean!
 }
@@ -67,8 +99,15 @@ type Pong {
   success: Boolean!
 }
 
+type SessionInfo {
+  session_id: String!
+  start_time: Float!
+  last_use_time: Float!
+  num_frames: Int!
+  num_objects: Int!
+}
+
 type Query {
-  ping(input: PingInput!): Pong!
   defaultVideo: Video!
   videos(
     """
@@ -88,6 +127,8 @@ type Query {
     """
     last: Int = null
   ): VideoConnection!
+  sessions: [SessionInfo!]!
+  ping(input: PingInput!): Pong!
   sharedVideo(path: String!): SharedVideo!
 }
 
@@ -100,11 +141,23 @@ type RLEMask {
 type RLEMaskForObject {
   objectId: Int!
   rleMask: RLEMask!
+  name: String
 }
 
 type RLEMaskListOnFrame {
   frameIndex: Int!
   rleMaskList: [RLEMaskForObject!]!
+}
+
+type YOLOBoxForObject {
+  object_id: Int!
+  box: [Float!]!
+  name: String
+}
+
+type BoxesListOnFrame {
+  frame_index: Int!
+  boxes: [YOLOBoxForObject!]!
 }
 
 input RemoveObjectInput {
@@ -158,11 +211,6 @@ type PageInfo {
   endCursor: String
 }
 
-type SharedVideo {
-  path: String!
-  url: String!
-}
-
 scalar Upload
 
 type Video implements Node {
@@ -170,6 +218,7 @@ type Video implements Node {
   The Globally Unique ID of this object
   """
   id: GlobalID!
+  code: GlobalID!
   path: String!
   posterPath: String
   width: Int!
@@ -209,4 +258,9 @@ type VideoEdge {
 schema {
   query: Query
   mutation: Mutation
+}
+
+type SharedVideo {
+  path: String!
+  url: String!
 }

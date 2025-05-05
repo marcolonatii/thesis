@@ -49,7 +49,7 @@ export default class EraseForegroundGLEffect extends BaseGLEffect {
     gl.uniform1i(this._numMasksUniformLocation, this._numMasks);
 
     // We know the max number of textures, pre-allocate 3.
-    this._maskTextures = preAllocateTextures(gl, 3);
+    this._maskTextures = preAllocateTextures(gl, 100);
   }
 
   apply(form: CanvasForm, context: EffectFrameContext, _tracklets: Tracklet[]) {

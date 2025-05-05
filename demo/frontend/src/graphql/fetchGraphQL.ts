@@ -85,6 +85,7 @@ export default async function fetchGraphQL(
   }
 
   try {
+    console.log('fetching', url, requestInit);
     const response = await fetch(url, requestInit);
     const result = await response.json();
 

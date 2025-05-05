@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,9 @@ import {BaseTracklet, DatalessMask} from '@/common/tracker/Tracker';
 import {spacing, w} from '@/theme/tokens.stylex';
 import stylex from '@stylexjs/stylex';
 import {useMemo} from 'react';
+import {getObjectLabel} from '@/common/components/annotations/ObjectUtils';
+import {trackletNamesAtom, TrackletNames} from '@/demo/atoms'; // Import atom and type
+import {useAtomValue} from 'jotai'; // Import useAtomValue
 
 const styles = stylex.create({
   container: {
@@ -77,9 +80,11 @@ type SwimlineSegment = {
   width: number;
 };
 
+type ExtendedTracklet = BaseTracklet & { name?: string | null };
+
 type Props = {
-  tracklet: BaseTracklet;
-  onSelectFrame: (tracklet: BaseTracklet, index: number) => void;
+  tracklet: ExtendedTracklet;
+  onSelectFrame: (tracklet: ExtendedTracklet, index: number) => void;
 };
 
 function getSwimlaneSegments(masks: DatalessMask[]): SwimlineSegment[] {
@@ -108,6 +113,7 @@ function getSwimlaneSegments(masks: DatalessMask[]): SwimlineSegment[] {
 
 export default function TrackletSwimlane({tracklet, onSelectFrame}: Props) {
   const selection = useSelectedFrameHelper();
+  const trackletNames = useAtomValue(trackletNamesAtom); // Get tracklet names here
 
   const segments = useMemo(() => {
     return getSwimlaneSegments(tracklet.masks);
@@ -124,13 +130,15 @@ export default function TrackletSwimlane({tracklet, onSelectFrame}: Props) {
   );
 
   if (selection === null) {
-    return;
+    // Return null instead of undefined for valid React render
+    return null;
   }
 
   return (
     <div {...stylex.props(styles.container)}>
       <div {...stylex.props(styles.trackletNameContainer)}>
-        Object {tracklet.id + 1}
+        {/* Pass trackletNames to getObjectLabel */}
+        {getObjectLabel(tracklet, trackletNames)}
       </div>
       <div {...stylex.props(styles.swimlaneContainer)}>
         <div
