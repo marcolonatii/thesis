@@ -44,7 +44,6 @@ class SAM2VideoPredictor(SAM2Base):
         video_path,
         offload_video_to_cpu=False,
         offload_state_to_cpu=False,
-        async_loading_frames=False,
     ):
         """Initialize an inference state."""
         compute_device = self.device  # device of the model
@@ -52,7 +51,6 @@ class SAM2VideoPredictor(SAM2Base):
             video_path=video_path,
             image_size=self.image_size,
             offload_video_to_cpu=offload_video_to_cpu,
-            async_loading_frames=async_loading_frames,
             compute_device=compute_device,
         )
         inference_state = {}
@@ -612,6 +610,16 @@ class SAM2VideoPredictor(SAM2Base):
                         run_mem_encoder=True,
                     )
                     obj_output_dict[storage_key][frame_idx] = current_out
+
+                    # Delete old state data to clear space
+                    storage_key, obj_key = "non_cond_frame_outputs", "output_dict_per_obj"
+                    oldest_allowed_idx = frame_idx - 256
+                    all_frame_idxs = obj_output_dict[storage_key].keys()
+                    old_frame_idxs = [idx for idx in all_frame_idxs if idx < oldest_allowed_idx]
+                    for old_idx in old_frame_idxs:
+                        obj_output_dict[storage_key].pop(old_idx)
+                        for obj_id in inference_state[obj_key].keys():
+                            inference_state[obj_key][obj_id][storage_key].pop(old_idx, None)
 
                 inference_state["frames_tracked_per_obj"][obj_idx][frame_idx] = {
                     "reverse": reverse
