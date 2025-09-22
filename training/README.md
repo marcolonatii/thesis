@@ -38,8 +38,8 @@ To get started with the training code, we provide a simple example to fine-tune 
     ```
 - To fine-tune the base model on MOSE using 8 GPUs, run 
 
-    ```python
-    python training/train.py \
+    ```bash
+    uv run sam2-train \
         -c configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml \
         --use-cluster 0 \
         --num-gpus 8
@@ -47,15 +47,15 @@ To get started with the training code, we provide a simple example to fine-tune 
 
     We also support multi-node training on a cluster using [SLURM](https://slurm.schedmd.com/documentation.html), for example, you can train on 2 nodes by running
 
-    ```python
-    python training/train.py \
+    ```bash
+    uv run sam2-train \
         -c configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml \
         --use-cluster 1 \
         --num-gpus 8 \
-        --num-nodes 2
-        --partition $PARTITION \
-        --qos $QOS \
-        --account $ACCOUNT
+        --num-nodes 2 \
+        --partition "$PARTITION" \
+        --qos "$QOS" \
+        --account "$ACCOUNT"
     ```
     where partition, qos, and account are optional and depend on your SLURM configuration.
     By default, the checkpoint and logs will be saved under `sam2_logs` directory in the root of the repo. Alternatively, you can set the experiment log directory in the config file as follows:
@@ -66,6 +66,14 @@ To get started with the training code, we provide a simple example to fine-tune 
     The training losses can be monitored using `tensorboard` logs stored under `tensorboard/` in the experiment log directory. We also provide a sample validation [split]( ../training/assets/MOSE_sample_val_list.txt) for evaluation purposes. To generate predictions, follow this [guide](../tools/README.md) on how to use our `vos_inference.py` script. After generating the predictions, you can run the `sav_evaluator.py` as detailed [here](../sav_dataset/README.md#sa-v-val-and-test-evaluation). The expected MOSE J&F after fine-tuning the Base plus model is 79.4.
     
     
+
+### Programmatic usage
+
+```python
+from sam2.train import run
+run("configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml", use_cluster=0, num_gpus=8)
+```
+
     After training/fine-tuning, you can then use the new checkpoint (saved in `checkpoints/` in the experiment log directory) similar to SAM 2 released checkpoints (as illustrated [here](../README.md#image-prediction)).
 ## Training on images and videos
 The code supports training on images and videos (similar to how SAM 2 is trained). We provide classes for loading SA-1B as a sample image dataset, SA-V as a sample video dataset, as well as any DAVIS-style video dataset (e.g. MOSE). Note that to train on SA-V, you must first extract all videos to JPEG frames using the provided extraction [script](./scripts/sav_frame_extraction_submitit.py). Below is an example of how to setup the datasets in your config to train on a mix of image and video datasets:

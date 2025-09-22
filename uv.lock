@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10.0"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'darwin'",
@@ -3398,6 +3398,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pillow" },
+    { name = "submitit" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "tqdm" },
@@ -3491,6 +3492,7 @@ requires-dist = [
     { name = "sam-2", extras = ["notebooks", "interactive-demo", "dev"], marker = "extra == 'all'" },
     { name = "scikit-image", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "strawberry-graphql", marker = "extra == 'interactive-demo'", specifier = ">=0.243.0" },
+    { name = "submitit", specifier = ">=1.5.3" },
     { name = "submitit", marker = "extra == 'dev'", specifier = ">=1.5.1" },
     { name = "tensorboard", marker = "extra == 'dev'", specifier = ">=2.17.0" },
     { name = "tensordict", marker = "extra == 'dev'", specifier = ">=0.6.0" },

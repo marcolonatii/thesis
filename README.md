@@ -213,6 +213,19 @@ See [sav_dataset/README.md](sav_dataset/README.md) for details.
 
 ## Training SAM 2
 
+### Library and CLI usage for training
+
+- CLI (uv):
+  ```bash
+  uv run sam2-train -c configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml --use-cluster 0 --num-gpus 8
+  ```
+
+- Programmatic:
+  ```python
+  from sam2.train import run
+  run("configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml", use_cluster=0, num_gpus=8)
+  ```
+
 You can train or fine-tune SAM 2 on custom datasets of images, videos, or both. Please check the training [README](training/README.md) on how to get started.
 
 ## Web demo for SAM 2
