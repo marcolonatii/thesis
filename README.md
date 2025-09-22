@@ -29,14 +29,37 @@
 
 ## Installation
 
-SAM 2 needs to be installed first before use. The code requires `python>=3.10`, as well as `torch>=2.5.1` and `torchvision>=0.20.1`. Please follow the instructions [here](https://pytorch.org/get-started/locally/) to install both PyTorch and TorchVision dependencies. You can install SAM 2 on a GPU machine using:
+SAM 2 needs to be installed first before use. The code requires `python>=3.10`, as well as `torch>=2.5.1` and `torchvision>=0.20.1`. 
+
+### Recommended: Installation with uv (fastest)
+
+We recommend using [uv](https://docs.astral.sh/uv/) for the fastest and most reliable installation experience. uv automatically manages Python versions and dependencies:
+
+```bash
+git clone https://github.com/facebookresearch/sam2.git && cd sam2
+
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install SAM 2 with all dependencies
+uv sync --extra notebooks --extra interactive-demo
+```
+
+To activate the environment and use SAM 2:
+
+```bash
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
+
+### Alternative: Installation with pip
+
+You can also install SAM 2 using traditional pip:
 
 ```bash
 git clone https://github.com/facebookresearch/sam2.git && cd sam2
 
 pip install -e .
 ```
-If you are installing on Windows, it's strongly recommended to use [Windows Subsystem for Linux (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) with Ubuntu.
 
 To use the SAM 2 predictor and run the example notebooks, `jupyter` and `matplotlib` are required and can be installed by:
 
@@ -44,10 +67,13 @@ To use the SAM 2 predictor and run the example notebooks, `jupyter` and `matplot
 pip install -e ".[notebooks]"
 ```
 
-Note:
-1. It's recommended to create a new Python environment via [Anaconda](https://www.anaconda.com/) for this installation and install PyTorch 2.5.1 (or higher) via `pip` following https://pytorch.org/. If you have a PyTorch version lower than 2.5.1 in your current environment, the installation command above will try to upgrade it to the latest PyTorch version using `pip`.
-2. The step above requires compiling a custom CUDA kernel with the `nvcc` compiler. If it isn't already available on your machine, please install the [CUDA toolkits](https://developer.nvidia.com/cuda-toolkit-archive) with a version that matches your PyTorch CUDA version.
-3. If you see a message like `Failed to build the SAM 2 CUDA extension` during installation, you can ignore it and still use SAM 2 (some post-processing functionality may be limited, but it doesn't affect the results in most cases).
+If you are installing on Windows, it's strongly recommended to use [Windows Subsystem for Linux (WSL)](https://learn.microsoft.com/en-us/windows/wsl/install) with Ubuntu.
+
+### Notes:
+1. **uv automatically manages Python versions** - no need for separate Python environment management tools.
+2. **CUDA extension compilation**: The installation requires compiling a custom CUDA kernel with the `nvcc` compiler. If it isn't already available on your machine, please install the [CUDA toolkits](https://developer.nvidia.com/cuda-toolkit-archive) with a version that matches your PyTorch CUDA version.
+3. **Build warnings**: If you see a message like `Failed to build the SAM 2 CUDA extension` during installation, you can ignore it and still use SAM 2 (some post-processing functionality may be limited, but it doesn't affect the results in most cases).
+4. **Environment variables**: You can control CUDA extension building with `SAM2_BUILD_CUDA=0` to disable or `SAM2_BUILD_ALLOW_ERRORS=0` to fail on build errors.
 
 Please see [`INSTALL.md`](./INSTALL.md) for FAQs on potential issues and solutions.
 
@@ -187,7 +213,20 @@ See [sav_dataset/README.md](sav_dataset/README.md) for details.
 
 ## Training SAM 2
 
-You can train or fine-tune SAM 2 on custom datasets of images, videos, or both. Please check the training [README](training/README.md) on how to get started.
+### Library and CLI usage for training
+
+- CLI (uv):
+  ```bash
+  uv run sam2-train -c configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml --use-cluster 0 --num-gpus 8
+  ```
+
+- Programmatic:
+  ```python
+  from sam2.train import run
+  run("configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml", use_cluster=0, num_gpus=8)
+  ```
+
+You can train or fine-tune SAM 2 on custom datasets of images, videos, or both. Please check the training [README](sam2/training/README.md) on how to get started.
 
 ## Web demo for SAM 2
 

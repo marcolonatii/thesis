@@ -8,7 +8,7 @@ Before you begin, ensure you have the following installed on your system:
 
 - Docker and Docker Compose
 - [OPTIONAL] Node.js and Yarn for running frontend locally
-- [OPTIONAL] Anaconda for running backend locally
+- [OPTIONAL] uv for running backend locally
 
 ### Installing Docker
 
@@ -29,12 +29,15 @@ To install Node.js and Yarn, follow these steps:
 npm install -g yarn
 ```
 
-### [OPTIONAL] Installing Anaconda
+### [OPTIONAL] Installing uv
 
-To install Anaconda, follow these steps:
+To install uv (recommended Python package manager), follow these steps:
 
-1. Go to the [Anaconda website](https://www.anaconda.com/products/distribution).
-2. Follow the installation instructions for your operating system.
+1. Run the installation command:
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+2. Restart your terminal or run `source ~/.bashrc` (Linux/macOS) to update your PATH.
 
 ## Quick Start
 
@@ -58,35 +61,41 @@ MPS (Metal Performance Shaders) is not supported with Docker. To use MPS, you ne
 
 ### Setting Up Your Environment
 
-1. **Create Conda environment**
+1. **Install system dependencies**
 
-   Create a new Conda environment for this project by running the following command or use your existing conda environment for SAM 2:
+   First, install ffmpeg using your system package manager:
 
+   **On Ubuntu/Debian:**
+   ```bash
+   sudo apt update && sudo apt install -y ffmpeg
    ```
-   conda create --name sam2-demo python=3.10 --yes
+
+   **On macOS:**
+   ```bash
+   brew install ffmpeg
    ```
 
-   This will create a new environment named `sam2-demo` with Python 3.10 as the interpreter.
+   **On other systems:** Follow the [FFmpeg installation guide](https://ffmpeg.org/download.html)
 
-2. **Activate the Conda environment:**
+2. **Install SAM 2 demo dependencies:**
+
+   Navigate to the SAM 2 checkout root directory and install project dependencies:
+
+   **With uv (recommended):**
+   ```bash
+   uv sync --extra interactive-demo
+   ```
+
+   **With pip:**
+   ```bash
+   pip install -e '.[interactive-demo]'
+   ```
+
+3. **Activate the environment (if using uv):**
 
    ```bash
-   conda activate sam2-demo
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
-
-3. **Install ffmpeg**
-
-   ```bash
-   conda install -c conda-forge ffmpeg
-   ```
-
-4. **Install SAM 2 demo dependencies:**
-
-Install project dependencies by running the following command in the SAM 2 checkout root directory:
-
-```bash
-pip install -e '.[interactive-demo]'
-```
 
 ### Running the Backend Locally
 

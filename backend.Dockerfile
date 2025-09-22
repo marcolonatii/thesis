@@ -23,16 +23,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libswscale-dev \
     pkg-config \
     build-essential \
-    libffi-dev
+    libffi-dev \
+    curl
 
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+COPY pyproject.toml .
+COPY uv.lock .
 COPY setup.py .
 COPY README.md .
 
-RUN pip install --upgrade pip setuptools
-RUN pip install -e ".[interactive-demo]"
+# Install dependencies with uv
+RUN uv sync --extra interactive-demo --no-dev
 
-# https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite/issues/69#issuecomment-1826764707
-RUN rm /opt/conda/bin/ffmpeg && ln -s /bin/ffmpeg /opt/conda/bin/ffmpeg
+# Ensure ffmpeg is available in the expected location
+RUN ln -sf /usr/bin/ffmpeg /usr/local/bin/ffmpeg
 
 # Make app directory. This directory will host all files required for the
 # backend and SAM 2 inference files.
