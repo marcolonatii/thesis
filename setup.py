@@ -9,7 +9,7 @@ from setuptools import find_packages, setup
 
 # Package metadata
 NAME = "SAM-2"
-VERSION = "1.0"
+VERSION = "1.1.0"
 DESCRIPTION = "SAM 2: Segment Anything in Images and Videos"
 URL = "https://github.com/facebookresearch/sam2"
 AUTHOR = "Meta AI"
@@ -20,9 +20,11 @@ LICENSE = "Apache 2.0"
 with open("README.md", "r", encoding="utf-8") as f:
     LONG_DESCRIPTION = f.read()
 
+TORCH_VERSION = os.environ.get("TORCH_VERSION", "2.5.1")
+
 # Required dependencies
 REQUIRED_PACKAGES = [
-    "torch>=2.5.1",
+    f"torch=={TORCH_VERSION}",
     "torchvision>=0.20.1",
     "numpy>=1.24.4",
     "tqdm>=4.66.1",
@@ -88,11 +90,16 @@ def get_extensions():
         return []
 
     try:
-        from torch.utils.cpp_extension import CUDAExtension
+        from torch.utils.cpp_extension import CUDAExtension, library_paths
+        # Where Torch ships its .so files (e.g. libc10.so, libtorch.so)
+        torch_libs = library_paths()  # typically [.../site-packages/torch/lib]
+        extra_link_args = [f"-Wl,-rpath,{p}" for p in torch_libs]
+        # Also add a stable relative fallback in case paths differ at runtime:
+        extra_link_args += ["-Wl,-rpath,$ORIGIN/../torch/lib"]
 
         srcs = ["sam2/csrc/connected_components.cu"]
         compile_args = {
-            "cxx": [],
+            "cxx": ["-O3", "-std=c++17"],
             "nvcc": [
                 "-DCUDA_HAS_FP16=1",
                 "-D__CUDA_NO_HALF_OPERATORS__",
@@ -100,7 +107,15 @@ def get_extensions():
                 "-D__CUDA_NO_HALF2_OPERATORS__",
             ],
         }
-        ext_modules = [CUDAExtension("sam2._C", srcs, extra_compile_args=compile_args)]
+        ext_modules = [
+            CUDAExtension(
+                "sam2._C",
+                srcs,
+                extra_compile_args=compile_args,
+                extra_link_args=extra_link_args
+            )
+        ]
+
     except Exception as e:
         if BUILD_ALLOW_ERRORS:
             print(CUDA_ERROR_MSG.format(e))
