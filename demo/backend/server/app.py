@@ -149,6 +149,27 @@ def image_masks_save() -> Response:
         }
     )
 
+@app.route("/image_masks", methods=["POST"])
+def image_masks() -> Response:
+    """
+    输入图片（url/path/data uri），直接返回全局 mask（base64 PNG 列表），不落盘。
+    """
+    data = request.get_json(silent=True) or {}
+    image_input = data.get("url") or data.get("path")
+    if not image_input:
+        return jsonify({"error": "url or path is required"}), 400
+
+    try:
+        masks_payload = inference_api.generate_masks_base64(image_input=image_input)
+    except Exception as exc:
+        logger.exception("failed to generate masks in memory")
+        return jsonify({"error": f"failed to generate masks: {exc}"}), 500
+
+    return jsonify({
+        "count": len(masks_payload),
+        "masks": masks_payload,
+    })
+
 
 # TOOD: Protect route with ToS permission check
 @app.route("/propagate_in_video", methods=["POST"])

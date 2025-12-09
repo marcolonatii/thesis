@@ -163,6 +163,33 @@ class InferenceAPI:
             byte_io.seek(0)
             return byte_io.getvalue()
 
+    def generate_masks_base64(self, image_input: str):
+        """生成全局 mask，直接以 base64 PNG 列表返回，不落盘。"""
+        print(image_input[:50])
+        with self.inference_lock:
+            img = self._load_image(image_input)
+            masks = self.mask_generator.generate(np.array(img))
+
+        payload: List[Dict[str, Any]] = []
+        for ann in masks:
+            seg = ann.get("segmentation")
+            if seg is None:
+                continue
+            mask_arr = np.array(seg).astype(np.uint8)
+            mask_arr = np.squeeze(mask_arr)
+            if mask_arr.ndim != 2:
+                continue
+            h, w = mask_arr.shape
+            mask_img = Image.fromarray(mask_arr * 255)
+            buf = BytesIO()
+            mask_img.save(buf, format="PNG")
+            buf.seek(0)
+            payload.append({
+                "size": [int(h), int(w)],
+                "png_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
+            })
+        return payload
+
     def save_masks_to_dir(
         self, image_input: str, output_dir: Path, filename_prefix: str = "mask"
     ) -> List[str]:
