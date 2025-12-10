@@ -6,7 +6,7 @@
 
 # Adapted from https://github.com/facebookresearch/segment-anything/blob/main/segment_anything/automatic_mask_generator.py
 from typing import Any, Dict, List, Optional, Tuple
-
+from sam2.utils.Track import get_gpu_mem
 import numpy as np
 import torch
 from torchvision.ops.boxes import batched_nms, box_area  # type: ignore
@@ -222,6 +222,7 @@ class SAM2AutomaticMaskGenerator:
         return curr_anns
 
     def _generate_masks(self, image: np.ndarray) -> MaskData:
+        logs = []
         orig_size = image.shape[:2]
         crop_boxes, layer_idxs = generate_crop_boxes(
             orig_size, self.crop_n_layers, self.crop_overlap_ratio
@@ -230,8 +231,11 @@ class SAM2AutomaticMaskGenerator:
         # Iterate over image crops
         data = MaskData()
         for crop_box, layer_idx in zip(crop_boxes, layer_idxs):
+            before = get_gpu_mem()
             crop_data = self._process_crop(image, crop_box, layer_idx, orig_size)
+            after = get_gpu_mem()
             data.cat(crop_data)
+            logs.append((crop_box, layer_idx, before, after))
 
         # Remove duplicate masks between crops
         if len(crop_boxes) > 1:
