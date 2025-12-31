@@ -122,10 +122,19 @@ def remove_embedding() -> Response:
 
 @app.route(f"/mask", methods=["POST"])
 def predict_image() -> Response:
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    image_base64 = data.get("base64") or data.get("image_base64") or data.get("url")
+    if not image_base64:
+        return jsonify({"error": "base64 is required"}), 400
 
     start_time = time.time()
-    res = inference_api.predict_image(data["url"], data["points"], data["labels"], None, True)
+    res = inference_api.predict_image(
+        image_base64,
+        data["points"],
+        data["labels"],
+        None,
+        True,
+    )
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"mask生成时间: {elapsed_time:.6f} 秒")

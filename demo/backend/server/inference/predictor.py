@@ -225,7 +225,7 @@ class InferenceAPI:
             return False
 
     def _load_image(self, image_input: str) -> Image.Image:
-        """Load an image from a data URI, local path, or URL."""
+        """Load an image from a base64 string, data URI, local path, or URL."""
         if image_input.startswith("data:"):
             header, encoded = image_input.split(",", 1)
             return Image.open(BytesIO(base64.b64decode(encoded))).convert("RGB")
@@ -234,24 +234,31 @@ class InferenceAPI:
         if local_path.exists():
             return Image.open(local_path).convert("RGB")
 
-        response = requests.get(image_input)
-        response.raise_for_status()
-        return Image.open(BytesIO(response.content)).convert("RGB")
+        if "://" in image_input:
+            response = requests.get(image_input)
+            response.raise_for_status()
+            return Image.open(BytesIO(response.content)).convert("RGB")
 
-    def predict_image(self,url:str,input_points:List[List[int]],input_labels:List[int],input_box:List[List[int]],multimask_output:bool):
-        print(url[:50],input_points,input_labels,input_box,multimask_output)
+        try:
+            decoded = base64.b64decode(image_input)
+            return Image.open(BytesIO(decoded)).convert("RGB")
+        except Exception as exc:
+            raise ValueError("unsupported image input") from exc
+
+    def predict_image(self,image_input:str,input_points:List[List[int]],input_labels:List[int],input_box:List[List[int]],multimask_output:bool):
+        print(image_input[:50],input_points,input_labels,input_box,multimask_output)
         with self.inference_lock:
-            if self.current_img != url:
-                loaded_from_cache = self._load_cached_embedding(url)
+            if self.current_img != image_input:
+                loaded_from_cache = self._load_cached_embedding(image_input)
                 if not loaded_from_cache:
-                    img = self._load_image(url)
+                    img = self._load_image(image_input)
                     self.img_predictor.set_image(img)
-                    self.current_img = url
-                    self._save_embedding_cache(url)
+                    self.current_img = image_input
+                    self._save_embedding_cache(image_input)
             masks, scores, logits = self.img_predictor.predict(
                 point_coords=np.array(input_points),
                 point_labels=np.array(input_labels),
-                box = np.array(input_box) if isinstance(input_box,List) else None,
+                box = np.array(input_box) if isinstance(input_box, list) and input_box else None,
                 multimask_output=multimask_output)
             sorted_ind = np.argsort(scores)[::-1]
             masks = masks[sorted_ind]
