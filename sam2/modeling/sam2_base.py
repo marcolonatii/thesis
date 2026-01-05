@@ -25,8 +25,8 @@ class SAM2Base(torch.nn.Module):
         image_encoder,
         memory_attention,
         memory_encoder,
-        num_maskmem=7,  # default 1 input frame + 6 previous frames
-        image_size=512,
+        num_maskmem=2,  # default 1 input frame + 6 previous frames
+        image_size=256,
         backbone_stride=16,  # stride of the image backbone output
         sigmoid_scale_for_mem_enc=1.0,  # scale factor for mask sigmoid prob
         sigmoid_bias_for_mem_enc=0.0,  # bias factor for mask sigmoid prob
@@ -36,7 +36,7 @@ class SAM2Base(torch.nn.Module):
         # The maximum number of conditioning frames to participate in the memory attention (-1 means no limit; if there are more conditioning frames than this limit,
         # we only cross-attend to the temporally closest `max_cond_frames_in_attn` conditioning frames in the encoder when tracking each frame). This gives the model
         # a temporal locality when handling a large number of annotated frames (since closer frames should be more important) and also avoids GPU OOM.
-        max_cond_frames_in_attn=-1,
+        max_cond_frames_in_attn=3,
         # on the first frame, whether to directly add the no-memory embedding to the image feature
         # (instead of using the transformer encoder)
         directly_add_no_mem_embed=False,
@@ -60,7 +60,7 @@ class SAM2Base(torch.nn.Module):
         # (self.num_maskmem - 2) nearest frames from every r-th frames, plus the last frame.
         memory_temporal_stride_for_eval=1,
         # whether to apply non-overlapping constraints on the object masks in the memory encoder during evaluation (to avoid/alleviate superposing masks)
-        non_overlap_masks_for_mem_enc=False,
+        non_overlap_masks_for_mem_enc=True,
         # whether to cross-attend to object pointers from other frames (based on SAM output tokens) in the encoder
         use_obj_ptrs_in_encoder=False,
         # the maximum number of object pointers from other frames in encoder cross attention (only relevant when `use_obj_ptrs_in_encoder=True`)
