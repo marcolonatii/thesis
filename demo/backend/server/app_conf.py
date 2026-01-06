@@ -9,7 +9,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-APP_ROOT = os.getenv("APP_ROOT", "/opt/sam2")
+APP_ROOT = os.getenv("APP_ROOT", "./sam2")
 
 API_URL = os.getenv("API_URL", "http://localhost:7263")
 
@@ -20,7 +20,7 @@ logger.info(f"using model size {MODEL_SIZE}")
 FFMPEG_NUM_THREADS = int(os.getenv("FFMPEG_NUM_THREADS", "1"))
 
 # Path for all data used in API
-DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
+DATA_PATH = Path(os.getenv("DATA_PATH", "./data"))
 
 # Max duration an uploaded video can have in seconds. The default is 10
 # seconds.
@@ -48,8 +48,13 @@ POSTERS_PREFIX = "posters"
 # Path where all posters are stored
 POSTERS_PATH = DATA_PATH / POSTERS_PREFIX
 
+# Prefix and path for temporary assets (e.g. generated masks)
+TEMP_PREFIX = "temp"
+TEMP_PATH = DATA_PATH / TEMP_PREFIX
+
 # Make sure any of those paths exist
 os.makedirs(DATA_PATH, exist_ok=True)
 os.makedirs(GALLERY_PATH, exist_ok=True)
 os.makedirs(UPLOADS_PATH, exist_ok=True)
 os.makedirs(POSTERS_PATH, exist_ok=True)
+os.makedirs(TEMP_PATH, exist_ok=True)
