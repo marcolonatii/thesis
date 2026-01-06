@@ -8,13 +8,14 @@ import logging
 import os
 import uuid
 import base64
+import hashlib
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import numpy as np
 import torch
-from app_conf import APP_ROOT, MODEL_SIZE
+from app_conf import APP_ROOT, MODEL_SIZE, TEMP_PATH
 from inference.data_types import (
     AddMaskRequest,
     AddPointsRequest,
@@ -113,23 +114,81 @@ class InferenceAPI:
         self.current_img = None
         self.inference_lock = Lock()
 
-    def _get_embedding_cache_path(self, image_input: str) -> Optional[Path]:
-        image_path = Path(image_input)
-        if not image_path.exists():
-            return None
-        return image_path.parent / "temp" / f"{image_path.stem}_sam2_embed.pt"
+    def _get_embedding_cache_path(
+        self, image_input: str, cache_dir: Optional[str] = None
+    ) -> Optional[Path]:
+        if cache_dir:
+            cache_base = Path(cache_dir)
+            if cache_base.suffix == ".pt":
+                return cache_base
+            cache_key = self._get_image_cache_key(image_input)
+            if cache_key is None:
+                return None
+            return cache_base / f"sam2_embed_{cache_key}.pt"
 
-    def _load_cached_embedding(self, image_input: str) -> bool:
-        cache_path = self._get_embedding_cache_path(image_input)
-        if cache_path is None or not cache_path.is_file():
-            return False
+        if image_input.startswith("data:") or "://" in image_input:
+            cache_key = self._get_image_cache_key(image_input)
+            if cache_key is None:
+                return None
+            return TEMP_PATH / f"sam2_embed_{cache_key}.pt"
 
         image_path = Path(image_input)
         try:
-            if cache_path.stat().st_mtime < image_path.stat().st_mtime:
-                return False
+            exists = image_path.exists()
         except OSError:
+            exists = False
+
+        if not exists:
+            cache_key = self._get_image_cache_key(image_input)
+            if cache_key is None:
+                return None
+            return TEMP_PATH / f"sam2_embed_{cache_key}.pt"
+        return image_path.parent / "temp" / f"{image_path.stem}_sam2_embed.pt"
+
+    def _get_image_cache_key(self, image_input: str) -> Optional[str]:
+        raw_bytes = self._decode_image_bytes_for_cache(image_input)
+        if raw_bytes is None:
+            return None
+        return hashlib.sha256(raw_bytes).hexdigest()
+
+    def _decode_image_bytes_for_cache(self, image_input: str) -> Optional[bytes]:
+        if image_input.startswith("data:"):
+            try:
+                _, encoded = image_input.split(",", 1)
+            except ValueError:
+                return None
+        else:
+            encoded = image_input
+
+        encoded = "".join(encoded.split())
+        if not encoded:
+            return None
+
+        padding = (-len(encoded)) % 4
+        if padding:
+            encoded += "=" * padding
+        try:
+            return base64.b64decode(encoded, validate=True)
+        except Exception:
+            return None
+
+    def _load_cached_embedding(
+        self, image_input: str, cache_dir: Optional[str] = None
+    ) -> bool:
+        cache_path = self._get_embedding_cache_path(image_input, cache_dir)
+        if cache_path is None or not cache_path.is_file():
             return False
+
+        if not image_input.startswith("data:") and "://" not in image_input:
+            image_path = Path(image_input)
+            try:
+                if (
+                    image_path.exists()
+                    and cache_path.stat().st_mtime < image_path.stat().st_mtime
+                ):
+                    return False
+            except OSError:
+                pass
 
         try:
             cache = torch.load(cache_path, map_location=self.device)
@@ -170,8 +229,10 @@ class InferenceAPI:
         self.current_img = image_input
         return True
 
-    def _save_embedding_cache(self, image_input: str) -> Optional[Path]:
-        cache_path = self._get_embedding_cache_path(image_input)
+    def _save_embedding_cache(
+        self, image_input: str, cache_dir: Optional[str] = None
+    ) -> Optional[Path]:
+        cache_path = self._get_embedding_cache_path(image_input, cache_dir)
         if cache_path is None or self.img_predictor._features is None:
             return None
 
@@ -194,27 +255,31 @@ class InferenceAPI:
             return None
         return cache_path
 
-    def precompute_image_embedding(self, image_input: str) -> Tuple[Optional[Path], bool]:
-        cache_path = self._get_embedding_cache_path(image_input)
+    def precompute_image_embedding(
+        self, image_input: str, cache_dir: Optional[str] = None
+    ) -> Tuple[Optional[Path], bool]:
+        cache_path = self._get_embedding_cache_path(image_input, cache_dir)
         if cache_path is None:
             raise FileNotFoundError(f"image not found: {image_input}")
 
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         with self.inference_lock:
-            if self._load_cached_embedding(image_input):
+            if self._load_cached_embedding(image_input, cache_dir):
                 return cache_path, True
 
             img = self._load_image(image_input)
             self.img_predictor.set_image(img)
             self.current_img = image_input
-            saved_path = self._save_embedding_cache(image_input)
+            saved_path = self._save_embedding_cache(image_input, cache_dir)
             if saved_path is None:
                 raise RuntimeError("failed to persist embedding cache to disk")
 
         return saved_path or cache_path, False
 
-    def remove_embedding_cache(self, image_input: str) -> bool:
-        cache_path = self._get_embedding_cache_path(image_input)
+    def remove_embedding_cache(
+        self, image_input: str, cache_dir: Optional[str] = None
+    ) -> bool:
+        cache_path = self._get_embedding_cache_path(image_input, cache_dir)
         if cache_path is None or not cache_path.exists():
             return False
         try:
@@ -245,16 +310,24 @@ class InferenceAPI:
         except Exception as exc:
             raise ValueError("unsupported image input") from exc
 
-    def predict_image(self,image_input:str,input_points:List[List[int]],input_labels:List[int],input_box:List[List[int]],multimask_output:bool):
+    def predict_image(
+        self,
+        image_input: str,
+        input_points: List[List[int]],
+        input_labels: List[int],
+        input_box: List[List[int]],
+        multimask_output: bool,
+        cache_dir: Optional[str] = None,
+    ):
         print(image_input[:50],input_points,input_labels,input_box,multimask_output)
         with self.inference_lock:
             if self.current_img != image_input:
-                loaded_from_cache = self._load_cached_embedding(image_input)
+                loaded_from_cache = self._load_cached_embedding(image_input, cache_dir)
                 if not loaded_from_cache:
                     img = self._load_image(image_input)
                     self.img_predictor.set_image(img)
                     self.current_img = image_input
-                    self._save_embedding_cache(image_input)
+                    self._save_embedding_cache(image_input, cache_dir)
             masks, scores, logits = self.img_predictor.predict(
                 point_coords=np.array(input_points),
                 point_labels=np.array(input_labels),
