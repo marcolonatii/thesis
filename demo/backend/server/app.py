@@ -126,6 +126,7 @@ def predict_image() -> Response:
     image_base64 = data.get("base64") or data.get("image_base64") or data.get("url")
     if not image_base64:
         return jsonify({"error": "base64 is required"}), 400
+    cache_dir = data.get("path")
 
     start_time = time.time()
     res = inference_api.predict_image(
@@ -134,6 +135,7 @@ def predict_image() -> Response:
         data["labels"],
         None,
         True,
+        cache_dir=cache_dir,
     )
     end_time = time.time()
     elapsed_time = end_time - start_time
