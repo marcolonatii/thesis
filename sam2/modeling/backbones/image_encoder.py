@@ -26,6 +26,16 @@ class ImageEncoder(nn.Module):
             self.trunk.channel_list == self.neck.backbone_channel_list
         ), f"Channel dims of trunk and neck do not match. Trunk: {self.trunk.channel_list}, neck: {self.neck.backbone_channel_list}"
 
+        #Lightweight bottleneck adapter applied to the neck output feature.
+        # Input/output dim = neck.d_model (256 for all SAM2 variants).
+        d = neck.d_model
+        self.adapter = nn.Sequential(
+            nn.Conv2d(d, d // 16, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(d // 16, d, kernel_size=3, padding=1),
+            nn.GELU(),
+        )
+
     def forward(self, sample: torch.Tensor):
         # Forward through backbone
         features, pos = self.neck(self.trunk(sample))
@@ -33,6 +43,8 @@ class ImageEncoder(nn.Module):
             # Discard the lowest resolution features
             features, pos = features[: -self.scalp], pos[: -self.scalp]
 
+        # Apply adapter with residual connection
+        features[-1] = features[-1] + self.adapter(features[-1])
         src = features[-1]
         output = {
             "vision_features": src,

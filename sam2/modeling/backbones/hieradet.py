@@ -259,6 +259,18 @@ class Hiera(nn.Module):
             embed_dim = dim_out
             self.blocks.append(block)
 
+        # Per-block bottleneck adapters (one per transformer block, matching each block's dim_out).
+        # Mirrors the adapter pattern from ImageEncoderViT.
+        self.adapters = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(blk.dim_out, blk.dim_out // 16, kernel_size=3, padding=1),
+                nn.GELU(),
+                nn.Conv2d(blk.dim_out // 16, blk.dim_out, kernel_size=3, padding=1),
+                nn.GELU(),
+            )
+            for blk in self.blocks
+        ])
+
         self.channel_list = (
             [self.blocks[i].dim_out for i in self.stage_ends[::-1]]
             if return_interm_layers
@@ -290,6 +302,8 @@ class Hiera(nn.Module):
         outputs = []
         for i, blk in enumerate(self.blocks):
             x = blk(x)
+            # Apply adapter with residual: x is (B, H, W, C), adapter expects (B, C, H, W)
+            x = x + self.adapters[i](x.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
             if (i == self.stage_ends[-1]) or (
                 i in self.stage_ends and self.return_interm_layers
             ):

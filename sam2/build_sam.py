@@ -164,11 +164,20 @@ def build_sam2_video_predictor_hf(model_id, **kwargs):
 def _load_checkpoint(model, ckpt_path):
     if ckpt_path is not None:
         sd = torch.load(ckpt_path, map_location="cpu", weights_only=True)["model"]
-        missing_keys, unexpected_keys = model.load_state_dict(sd)
+        # Load non-strictly so newly added modules (e.g. adapters) can be present
+        # in the model but missing from the checkpoint. Log missing/unexpected
+        # keys instead of raising so users can train newly added parameters.
+        res = model.load_state_dict(sd, strict=False)
+        # torch.load_state_dict may return a tuple or an object with attributes
+        if isinstance(res, tuple):
+            missing_keys, unexpected_keys = res
+        else:
+            missing_keys = getattr(res, "missing_keys", None)
+            unexpected_keys = getattr(res, "unexpected_keys", None)
+
         if missing_keys:
-            logging.error(missing_keys)
-            raise RuntimeError()
+            logging.warning("Checkpoint missing keys (will be initialized): %s", missing_keys)
         if unexpected_keys:
-            logging.error(unexpected_keys)
-            raise RuntimeError()
-        logging.info("Loaded checkpoint sucessfully")
+            logging.warning("Checkpoint had unexpected keys: %s", unexpected_keys)
+
+        logging.info("Loaded checkpoint (partial) successfully")
