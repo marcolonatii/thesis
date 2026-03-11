@@ -242,7 +242,7 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--image_size",      type=int, nargs=2, default=[448, 448],
                    metavar=("H", "W"),
                    help="Resize all frames/masks to this size (must be multiples of 14)")
-    p.add_argument("--val_split",       type=float, default=0.01,
+    p.add_argument("--val_split",       type=float, default=0.05,
                    help="Fraction of data used for validation")
     p.add_argument("--epochs",          type=int,   default=20)
     p.add_argument("--batch_size",      type=int,   default=4)
