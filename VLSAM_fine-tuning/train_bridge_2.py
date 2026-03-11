@@ -210,8 +210,6 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--batch_size",      type=int,   default=4)
     p.add_argument("--lr",              type=float, default=1e-4)
     p.add_argument("--weight_decay",    type=float, default=1e-4)
-    p.add_argument("--dropout",         type=float, default=0.1,
-                   help="Dropout rate for SaliencyBridge Dropout2d layers")
     p.add_argument("--pos_weight",      type=float, default=None)
     p.add_argument("--device",          default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--checkpoint_dir",  default="./bridge2_ckpts")
@@ -231,11 +229,6 @@ def main() -> None:
     # ── Model ─────────────────────────────────────────────────────────────
     print("Loading DINOv3SAM2Bridge (bridge_2) …")
     bridge = DINOv3SAM2Bridge(freeze_backbone=True, device=device)
-
-    # bridge_2.SaliencyBridge exposes dropout; patch it in before training
-    if args.dropout != 0.1:
-        bridge.bridge.dropout_1 = nn.Dropout2d(args.dropout)
-        bridge.bridge.dropout_2 = nn.Dropout2d(args.dropout)
 
     # ── Validate image_size ────────────────────────────────────────────────
     patch = bridge.extractor.patch_size
