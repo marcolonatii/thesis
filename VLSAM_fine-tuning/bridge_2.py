@@ -214,47 +214,50 @@ class SaliencyBridge(nn.Module):
         print(f'Dropout Rate: {dropout}')
         self.target_size = target_size  # (H, W) of the original frame
 
-        # ── ADD YOUR CONVOLUTIONS HERE ─────────────────────────────────────
-        #
-        # Example 1 — minimal linear projection (no spatial mixing):
-        #   self.proj = nn.Conv2d(in_channels, 1, kernel_size=1)
-        #
-        # Example 2 — small CNN head:
-        #   self.proj = nn.Sequential(
-        #       nn.Conv2d(in_channels, 256, 3, padding=1),
-        #       nn.GELU(),
-        #       nn.Conv2d(256, 64, 3, padding=1),
-        #       nn.GELU(),
-        #       nn.Conv2d(64, 1, 1),
-        #   )
-        #
-        # Whatever you use should map  (B, in_channels, h, w) → (B, 1, h, w)
-        # ──────────────────────────────────────────────────────────────────
+        self.dino_proj = nn.Sequential(
+            nn.Conv2d(in_channels, 256, kernel_size=1, padding=0, bias=False),
+            nn.GroupNorm(num_groups=16, num_channels=256),
+            nn.GELU(),
+        )
 
-        # linear probe
-        #self.conv_1 = nn.Conv2d(in_channels, 1, kernel_size=1, padding=0, bias=True)
+        self.rgb_encoder = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(num_groups=8, num_channels=32),
+            nn.GELU(),
 
-        self.conv_1 = nn.Conv2d(in_channels, 256, kernel_size=1, padding=0)
+            nn.Conv2d(32, 64, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(num_groups=8, num_channels=64),
+            nn.GELU(),
+
+            nn.Conv2d(64, 128, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(num_groups=8, num_channels=128),
+            nn.GELU()
+        )
+
+        self.rgb_proj = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=1, padding=0, bias=False),
+            nn.GroupNorm(num_groups=16, num_channels=256),
+            nn.GELU(),
+        )
+
+        self.fuse_1 = nn.Conv2d(512, 256, kernel_size=3, padding=1, bias=False)
         self.norm_1 = nn.GroupNorm(num_groups=16, num_channels=256)
         self.gelu_1 = nn.GELU()
+        self.dropout_1 = nn.Dropout2d(dropout)
 
-        self.conv_2 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
-        self.norm_2 = nn.GroupNorm(num_groups=16, num_channels=256)
+        self.fuse_2 = nn.Conv2d(256, 64, kernel_size=3, padding=1, bias=False)
+        self.norm_2 = nn.GroupNorm(num_groups=8, num_channels=64)
         self.gelu_2 = nn.GELU()
         self.dropout_2 = nn.Dropout2d(dropout)
-
-        self.conv_3 = nn.Conv2d(256, 64, kernel_size=3, padding=1)
-        self.norm_3 = nn.GroupNorm(num_groups=8, num_channels=64)
-        self.gelu_3 = nn.GELU()
-        self.dropout_3 = nn.Dropout2d(dropout)
-
-        self.conv_4 = nn.Conv2d(64, 1, kernel_size=1, padding=0)
+        
+        self.out_conv = nn.Conv2d(64, 1, kernel_size=1, padding=0, bias=True)
         
 
     # ------------------------------------------------------------------
     def forward(
         self,
         features: torch.Tensor,               # (B, C, h, w)
+        image: torch.Tensor,                  # (B, 3, H, W)
         target_size: Optional[tuple[int, int]] = None,  # (H, W)
     ) -> torch.Tensor:
         """
@@ -263,36 +266,33 @@ class SaliencyBridge(nn.Module):
         saliency : (B, 1, H, W)
             Raw logits.  Positive values → foreground for SAM2.
         """
-        #x = features # (B, C, h, w)
-        #x = self.conv_1(x) # (B, 1, h, w)
-        # bilinear upsample to full frame resolution
-        #size = target_size or self.target_size
-        #if size is not None:
-        #    x = F.interpolate(x, size=size, mode="bilinear", align_corners=False)
-        #return x  # (B, 1, H, W)
+        _, _, h, w = features.shape
 
-        x = features
-        x = self.conv_1(x)
+        dino_feat = self.dino_proj(features)    # (B, 256, h, w)
+
+        rgb_feat = self.rgb_encoder(image)            # (B, 128, H, W)
+        rgb_feat = F.interpolate(rgb_feat, size=(h, w), mode="bilinear", align_corners=False)  # (B, 128, h, w)
+        rgb_feat = self.rgb_proj(rgb_feat)           # (B, 256, h, w)
+
+        x = torch.cat([dino_feat, rgb_feat], dim=1)  # (B, 512, h, w)
+
+        x = self.fuse_1(x)
         x = self.norm_1(x)
         x = self.gelu_1(x)
+        #x = self.dropout_1(x)
 
-        x = self.conv_2(x)
+        x = self.fuse_2(x)
         x = self.norm_2(x)
         x = self.gelu_2(x)
         #x = self.dropout_2(x)
 
-        x = self.conv_3(x)
-        x = self.norm_3(x)
-        x = self.gelu_3(x)
-        #x = self.dropout_3(x)
+        x = self.out_conv(x)  # (B, 1, h, w)
 
-        x = self.conv_4(x)  # (B, 1, h, w)
-        # bilinear upsample to full frame resolution
         size = target_size or self.target_size
         if size is not None:
             x = F.interpolate(x, size=size, mode="bilinear", align_corners=False)
 
-        return x  # (B, 1, H, W)
+        return x        
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -339,7 +339,7 @@ class DINOv3SAM2Bridge(nn.Module):
         Returns saliency (B, 1, H, W).
         """
         features = self.extractor(pixel_values)           # (B, C, h, w)
-        saliency = self.bridge(features, target_size)     # (B, 1, H, W)
+        saliency = self.bridge(features, image=pixel_values, target_size=target_size)     # (B, 1, H, W)
         return saliency
 
 
