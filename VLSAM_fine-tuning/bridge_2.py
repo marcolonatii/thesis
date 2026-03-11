@@ -279,12 +279,12 @@ class SaliencyBridge(nn.Module):
         x = self.fuse_1(x)
         x = self.norm_1(x)
         x = self.gelu_1(x)
-        #x = self.dropout_1(x)
+        x = self.dropout_1(x)
 
         x = self.fuse_2(x)
         x = self.norm_2(x)
         x = self.gelu_2(x)
-        #x = self.dropout_2(x)
+        x = self.dropout_2(x)
 
         x = self.out_conv(x)  # (B, 1, h, w)
 

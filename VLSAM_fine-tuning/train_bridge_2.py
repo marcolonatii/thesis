@@ -205,16 +205,18 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--data_root",       required=True)
     p.add_argument("--image_size",      type=int, nargs=2, default=[448, 448],
                    metavar=("H", "W"))
-    p.add_argument("--val_split",       type=float, default=0.05)
+    p.add_argument("--val_split",       type=float, default=0.1)
     p.add_argument("--epochs",          type=int,   default=20)
     p.add_argument("--batch_size",      type=int,   default=4)
-    p.add_argument("--lr",              type=float, default=1e-4)
+    p.add_argument("--lr",              type=float, default=5e-5)
     p.add_argument("--weight_decay",    type=float, default=1e-4)
     p.add_argument("--pos_weight",      type=float, default=None)
     p.add_argument("--device",          default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--checkpoint_dir",  default="./bridge2_ckpts")
     p.add_argument("--resume",          default=None)
     p.add_argument("--num_workers",     type=int,   default=4)
+    p.add_argument("--patience",        type=int,   default=5,
+                   help="Early stopping patience on val_iou (epochs without improvement)")
     return p.parse_args()
 
 
@@ -360,7 +362,8 @@ def main() -> None:
     best_val_loss      = float("inf")
     best_val_iou       = -float("inf")
     best_val_precision = -float("inf")
-    print(f"\nStarting training for {args.epochs} epochs …\n")
+    epochs_no_improve  = 0
+    print(f"\nStarting training for {args.epochs} epochs (patience={args.patience}) …\n")
 
     for epoch in range(1, args.epochs + 1):
         train_loss, train_iou, train_prec = run_epoch(
@@ -400,8 +403,15 @@ def main() -> None:
 
         if val_iou > best_val_iou:
             best_val_iou = val_iou
+            epochs_no_improve = 0
             _save(ckpt_dir / "bridge_best_iou.pt", {"metric": "val_iou"})
             print(f"  ↳ Best val_iou={best_val_iou:.4f} → {ckpt_dir / 'bridge_best_iou.pt'}")
+        else:
+            epochs_no_improve += 1
+            print(f"  (no val_iou improvement for {epochs_no_improve}/{args.patience} epochs)")
+            if epochs_no_improve >= args.patience:
+                print(f"Early stopping triggered after {epoch} epochs.")
+                break
 
         if val_prec > best_val_precision:
             best_val_precision = val_prec
