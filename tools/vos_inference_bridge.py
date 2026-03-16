@@ -50,7 +50,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "VLSAM_fine-tuning"))
 
 from sam2.build_sam import build_sam2_video_predictor
-from dinov3_sam2_bridge import DINOv3SAM2Bridge, add_saliency_to_sam2
+from bridge_2 import DINOv3SAM2Bridge, add_saliency_to_sam2
 
 
 # ─────────────────────────────────────────────────────────────────────────────

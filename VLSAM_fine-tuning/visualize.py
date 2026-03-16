@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "VLSAM_fine-tuning"))
 
-from dinov3_sam2_bridge import DINOv3SAM2Bridge
+from bridge_2 import DINOv3SAM2Bridge
 
 _IMG_EXTS  = {".jpg", ".jpeg", ".png", ".bmp", ".JPG", ".JPEG", ".PNG"}
 _MASK_EXTS = {".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG"}

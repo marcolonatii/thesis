@@ -42,7 +42,7 @@ import torch
 import torch.nn as nn
 import torchvision.transforms.functional as TF
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import ConcatDataset, DataLoader, Dataset, random_split
 from tqdm import tqdm
 
 # ── make sure the package is importable from any cwd ──────────────────────────
@@ -118,6 +118,78 @@ class FrameMaskDataset(Dataset):
         return frame, mask_tensor
 
 
+class COD10KDataset(Dataset):
+    """Loads the COD10K-v3 dataset from its Test/ and Train/ splits.
+
+    Expected layout::
+
+        <cod10k_root>/
+          Train/
+            Image/      *.jpg
+            GT_Object/  *.png
+          Test/
+            Image/      *.jpg
+            GT_Object/  *.png
+    """
+
+    IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
+
+    def __init__(
+        self,
+        cod10k_root: str | Path,
+        image_size: tuple[int, int] = (448, 448),
+    ) -> None:
+        self.image_size = image_size
+        root = Path(cod10k_root)
+
+        self.pairs: list[tuple[Path, Path]] = []
+
+        for split in ("Train", "Test"):
+            img_dir  = root / split / "Image"
+            mask_dir = root / split / "GT_Object"
+            if not img_dir.exists() or not mask_dir.exists():
+                raise FileNotFoundError(
+                    f"COD10K split '{split}' not found under {root}. "
+                    f"Expected {img_dir} and {mask_dir}."
+                )
+            for img_path in sorted(img_dir.iterdir()):
+                if img_path.suffix.lower() not in self.IMAGE_EXTENSIONS:
+                    continue
+                mask_path = mask_dir / (img_path.stem + ".png")
+                if not mask_path.exists():
+                    # Try matching any mask extension
+                    for ext in (".jpg", ".jpeg"):
+                        cand = mask_dir / (img_path.stem + ext)
+                        if cand.exists():
+                            mask_path = cand
+                            break
+                    else:
+                        continue  # no matching mask
+                self.pairs.append((img_path, mask_path))
+
+        if not self.pairs:
+            raise RuntimeError(
+                f"No (image, mask) pairs found in COD10K dataset at {cod10k_root}."
+            )
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int) -> tuple[Image.Image, torch.Tensor]:
+        img_path, mask_path = self.pairs[idx]
+
+        frame = Image.open(img_path).convert("RGB")
+
+        mask = Image.open(mask_path).convert("L")
+        mask = mask.resize(
+            (self.image_size[1], self.image_size[0]), Image.NEAREST
+        )
+        mask_np = np.array(mask, dtype=np.float32)
+        mask_tensor = torch.from_numpy((mask_np > 127).astype(np.float32))
+
+        return frame, mask_tensor
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Augmentation wrapper
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,11 +207,12 @@ class AugmentWrapper(Dataset):
         return self.aug_fn(frame, mask)
 
 
-def collate_fn(bridge: DINOv3SAM2Bridge, device: torch.device, image_size: tuple[int, int]):
+def collate_fn(bridge: DINOv3SAM2Bridge, image_size: tuple[int, int]):
+    """Preprocessing runs on CPU inside the worker; GPU transfer happens in run_epoch."""
     def _collate(batch: list[tuple[Image.Image, torch.Tensor]]):
         frames, masks = zip(*batch)
-        pixel_values = bridge.extractor.preprocess(list(frames), device=device, size=image_size)
-        masks = torch.stack(masks, dim=0).to(device)
+        pixel_values = bridge.extractor.preprocess(list(frames), device="cpu", size=image_size)
+        masks = torch.stack(masks, dim=0)
         return pixel_values, masks
     return _collate
 
@@ -168,6 +241,8 @@ def run_epoch(
 
     with context:
         for pixel_values, gt_masks in tqdm(loader, desc="train" if train else "val ", leave=False):
+            pixel_values = pixel_values.to(device)
+            gt_masks = gt_masks.to(device)
             logits = bridge(pixel_values, target_size=image_size)  # (B, 1, H, W)
             logits = logits.squeeze(1)                              # (B, H, W)
 
@@ -202,7 +277,9 @@ def get_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Train bridge_2 (DINOv3 + RGB encoder) SaliencyBridge"
     )
-    p.add_argument("--data_root",       required=True)
+    p.add_argument("--data_root",       default=None,
+                   help="Primary dataset root (frames_train/ + masks_train/). "
+                        "Optional when --cod10k_root is provided.")
     p.add_argument("--image_size",      type=int, nargs=2, default=[448, 448],
                    metavar=("H", "W"))
     p.add_argument("--val_split",       type=float, default=0.1)
@@ -217,6 +294,9 @@ def get_args() -> argparse.Namespace:
     p.add_argument("--num_workers",     type=int,   default=4)
     p.add_argument("--patience",        type=int,   default=5,
                    help="Early stopping patience on val_iou (epochs without improvement)")
+    p.add_argument("--cod10k_root",     default=None,
+                   help="Optional path to COD10K-v3 root dir. When set, both Train/ and Test/ "
+                        "splits are merged with the primary dataset before val split.")
     return p.parse_args()
 
 
@@ -250,9 +330,25 @@ def main() -> None:
     print(f"Trainable parameters: {n_params:,}  (SaliencyBridge only)")
 
     # ── Dataset ───────────────────────────────────────────────────────────
-    print(f"Loading dataset from {args.data_root} …")
-    full_dataset = FrameMaskDataset(args.data_root, image_size=image_size)
-    print(f"  Total pairs: {len(full_dataset)}")
+    if args.data_root is None and args.cod10k_root is None:
+        raise ValueError("At least one of --data_root or --cod10k_root must be provided.")
+
+    datasets = []
+
+    if args.data_root is not None:
+        print(f"Loading primary dataset from {args.data_root} …")
+        primary_dataset = FrameMaskDataset(args.data_root, image_size=image_size)
+        print(f"  Primary pairs: {len(primary_dataset)}")
+        datasets.append(primary_dataset)
+
+    if args.cod10k_root is not None:
+        print(f"Loading COD10K-v3 dataset from {args.cod10k_root} …")
+        cod10k_dataset = COD10KDataset(args.cod10k_root, image_size=image_size)
+        print(f"  COD10K pairs:  {len(cod10k_dataset)}")
+        datasets.append(cod10k_dataset)
+
+    full_dataset = ConcatDataset(datasets) if len(datasets) > 1 else datasets[0]
+    print(f"  Total pairs:   {len(full_dataset)}")
 
     n_val   = max(1, int(len(full_dataset) * args.val_split))
     n_train = len(full_dataset) - n_val
@@ -314,7 +410,7 @@ def main() -> None:
 
     train_ds = AugmentWrapper(train_ds, augment_fn)
 
-    _collate = collate_fn(bridge, device, image_size)
+    _collate = collate_fn(bridge, image_size)
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, collate_fn=_collate, pin_memory=False,
@@ -401,6 +497,11 @@ def main() -> None:
             _save(ckpt_dir / "bridge_best_loss.pt", {"metric": "val_loss"})
             print(f"  ↳ Best val_loss={best_val_loss:.4f} → {ckpt_dir / 'bridge_best_loss.pt'}")
 
+        if val_prec > best_val_precision:
+            best_val_precision = val_prec
+            _save(ckpt_dir / "bridge_best_precision.pt", {"metric": "val_precision"})
+            print(f"  ↳ Best val_prec={best_val_precision:.4f} → {ckpt_dir / 'bridge_best_precision.pt'}")
+
         if val_iou > best_val_iou:
             best_val_iou = val_iou
             epochs_no_improve = 0
@@ -412,11 +513,6 @@ def main() -> None:
             if epochs_no_improve >= args.patience:
                 print(f"Early stopping triggered after {epoch} epochs.")
                 break
-
-        if val_prec > best_val_precision:
-            best_val_precision = val_prec
-            _save(ckpt_dir / "bridge_best_precision.pt", {"metric": "val_precision"})
-            print(f"  ↳ Best val_prec={best_val_precision:.4f} → {ckpt_dir / 'bridge_best_precision.pt'}")
 
         _save(ckpt_dir / f"bridge_epoch{epoch:03d}.pt", {})
 
