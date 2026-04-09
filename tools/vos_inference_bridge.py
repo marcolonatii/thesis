@@ -40,6 +40,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
+from scipy.ndimage import distance_transform_edt
 from tqdm import tqdm
 
 import torch
@@ -51,6 +52,107 @@ sys.path.insert(0, str(REPO_ROOT / "VLSAM_fine-tuning"))
 
 from sam2.build_sam import build_sam2_video_predictor
 from bridge_2 import DINOv3SAM2Bridge, add_saliency_to_sam2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompt helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _saliency_to_binary(saliency: torch.Tensor, threshold: float = 0.5) -> np.ndarray:
+    """Convert (1,1,H,W) logit saliency map to a boolean (H,W) numpy mask."""
+    return (torch.sigmoid(saliency)[0, 0].cpu().numpy() > threshold)
+
+
+def _mask_points(
+    binary_mask: np.ndarray,
+    n: int = 1,
+) -> np.ndarray | None:
+    """
+    Return (n, 2) array of (x, y) foreground points sampled from binary_mask.
+
+    Strategy
+    --------
+    1. Compute the centroid of all foreground pixels.
+    2. If the centroid itself is NOT a foreground pixel (common for concave /
+       curved shapes like snakes), snap it to the nearest foreground pixel.
+    3. If n > 1, additionally sample (n-1) evenly-spaced foreground pixels
+       across the sorted list of all fg pixels (good for elongated objects).
+
+    Returns None if the mask is empty.
+    """
+    ys, xs = np.where(binary_mask)
+    if len(xs) == 0:
+        return None
+
+    fg_pts = np.stack([xs, ys], axis=1).astype(np.float32)  # (M, 2)
+
+    # --- centroid, snapped to nearest fg pixel if not inside mask ---
+    cx, cy = float(xs.mean()), float(ys.mean())
+    if not binary_mask[int(round(cy)), int(round(cx))]:
+        # find closest foreground pixel to the centroid
+        dists = np.sqrt((fg_pts[:, 0] - cx) ** 2 + (fg_pts[:, 1] - cy) ** 2)
+        nearest = fg_pts[int(np.argmin(dists))]
+        cx, cy = float(nearest[0]), float(nearest[1])
+
+    if n == 1:
+        return np.array([[cx, cy]], dtype=np.float32)
+
+    # --- sample n-1 additional interior points using distance transform ---
+    # distance_transform_edt gives each fg pixel its distance to the nearest
+    # background pixel; sampling from high-distance pixels keeps points well
+    # inside the object and away from edges.
+    dist = distance_transform_edt(binary_mask)       # (H, W) float
+    dist_vals = dist[ys, xs]                         # distance for each fg pixel
+    # sort by distance descending (most-interior first), then pick evenly-spaced
+    order = np.argsort(dist_vals)[::-1]              # indices into fg_pts
+    interior_pts = fg_pts[order]                     # most-interior first
+    # cap pool to the top half so linspace never reaches edge pixels
+    pool_size = max(n - 1, len(interior_pts) // 2)
+    pool = interior_pts[:pool_size]
+    indices = np.linspace(0, len(pool) - 1, n, dtype=int)[:-1]
+    extra = pool[indices]                            # (n-1, 2)
+    return np.vstack([[[cx, cy]], extra]).astype(np.float32)  # (n, 2)
+
+
+def prompt_sam2(
+    predictor,
+    inference_state,
+    frame_idx: int,
+    obj_id: int,
+    saliency: torch.Tensor,
+    mode: str = "both",          # "mask" | "centroid" | "both"
+    sal_threshold: float = 0.5,
+    num_points: int = 1,
+) -> None:
+    """
+    Register a saliency prompt with SAM2 using the chosen prompt mode.
+
+    Modes
+    -----
+    mask      – dense binary mask via add_new_mask
+    centroid  – foreground point(s) via add_new_points_or_box
+                (centroid snapped to nearest fg pixel; n extra evenly-spaced
+                 points added if num_points > 1 — useful for elongated objects)
+    both      – centroid point(s) first, then dense mask (recommended)
+    """
+    binary = _saliency_to_binary(saliency, sal_threshold)
+
+    if mode in ("centroid", "both"):
+        pts = _mask_points(binary, n=num_points)
+        if pts is not None:
+            labels = np.ones(len(pts), dtype=np.int32)   # all foreground
+            predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=frame_idx,
+                obj_id=obj_id,
+                points=pts,
+                labels=labels,
+            )
+
+    if mode in ("mask", "both"):
+        add_saliency_to_sam2(
+            predictor, inference_state, frame_idx, obj_id, saliency
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,9 +228,12 @@ def process_video(
     bridge: DINOv3SAM2Bridge,
     out_dir: Path,
     device: torch.device,
-    redetect_every: int | None = None,  # None → no periodic re-detection
+    redetect_every: int | None = None,
     obj_id: int = 1,
     save_overlay: bool = False,
+    prompt_mode: str = "both",
+    num_points: int = 1,
+    min_fg_pixels: int = 1,
 ) -> dict[int, np.ndarray]:
     """
     Full pipeline for a single video.  Returns {frame_idx: bool mask (H,W)}.
@@ -145,12 +250,12 @@ def process_video(
     seed_frame_idx: int | None = None
     seed_saliency: torch.Tensor | None = None
 
-    print("[bridge] Scanning frames for first non-empty saliency map …")
+    print(f"[bridge] Scanning frames for seed (min_fg_pixels={min_fg_pixels}) …")
     for fi in range(N):
         sal, (H, W) = compute_saliency(bridge, frame_paths[fi], device)
         fg = saliency_fg_count(sal)
         print(f"  frame {fi:05d}: {fg} foreground pixels")
-        if fg > 0:
+        if fg >= min_fg_pixels:
             seed_frame_idx = fi
             seed_saliency  = sal
             break
@@ -174,8 +279,6 @@ def process_video(
     add_saliency_to_sam2(
         predictor, inference_state, seed_frame_idx, obj_id, seed_saliency
     )
-
-    # ── Step 3: backward propagation (seed → 0), only if seed > 0 ─────────
     if seed_frame_idx > 0:
         print(f"[propagate] Backward from frame {seed_frame_idx} to 0 …")
         for fidx, _oids, logits in tqdm(
@@ -230,8 +333,9 @@ def process_video(
             if fg > 0:
                 n_redetect += 1
                 print(f"\n[redetect #{n_redetect}] frame {next_stop}: {fg} fg pixels → re-prompting SAM2")
-                add_saliency_to_sam2(
-                    predictor, inference_state, next_stop, obj_id, sal
+                prompt_sam2(
+                    predictor, inference_state, next_stop, obj_id, sal,
+                    mode=prompt_mode, num_points=num_points,
                 )
             else:
                 print(f"\n[redetect] frame {next_stop}: 0 fg pixels → keeping SAM2 state")
@@ -280,9 +384,26 @@ def parse_args() -> argparse.Namespace:
                    help="Every N frames re-run the bridge; if > 0 fg pixels found, "
                         "re-prompt SAM2.  Omit to disable re-detection entirely.")
 
+    # Prompt mode
+    p.add_argument("-prompt_mode", default="both",
+                   choices=["mask", "centroid", "both"],
+                   help="How to prompt SAM2: "
+                        "'mask' = dense binary mask only; "
+                        "'centroid' = foreground point(s) only; "
+                        "'both' = point(s) + dense mask (recommended).")
+    p.add_argument("-num_points", type=int, default=1,
+                   help="Number of foreground points to pass to SAM2 when "
+                        "prompt_mode is 'centroid' or 'both'. "
+                        "1 = snapped centroid only; >1 also adds evenly-spaced "
+                        "fg pixels (useful for elongated objects like snakes).")
+
     # Misc
     p.add_argument("-save_overlay", action="store_true", default=False,
                    help="Save colour-blended overlay images")
+    p.add_argument("-min_fg_pixels", type=int, default=1,
+                   help="Minimum foreground pixel count for a frame to be "
+                        "accepted as the seed (default 1; increase to skip "
+                        "small/noisy detections, e.g. 500).")
     p.add_argument("--device",      default="cuda:0")
 
     return p.parse_args()
@@ -359,6 +480,9 @@ def main() -> None:
                 device=device,
                 redetect_every=args.redetect_every,
                 save_overlay=args.save_overlay,
+                prompt_mode=args.prompt_mode,
+                num_points=args.num_points,
+                min_fg_pixels=args.min_fg_pixels,
             )
         except Exception as exc:
             print(f"[error] {vid_name}: {exc}")
