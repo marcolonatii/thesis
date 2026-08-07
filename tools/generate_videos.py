@@ -9,7 +9,7 @@ def parse_args():
     parser.add_argument("--frames", required=True, help="Path to frames root folder")
     parser.add_argument("--masks", required=True, help="Path to predictions root folder")
     parser.add_argument("--output", required=True, help="Output folder for videos")
-    parser.add_argument("--fps", type=int, default=20, help="Frames per second (default=20)")
+    parser.add_argument("--fps", type=float, default=29.97, help="Frames per second (default=29.97)")
     parser.add_argument("--alpha", type=float, default=0.45, help="Mask transparency (0-1)")
     return parser.parse_args()
 
